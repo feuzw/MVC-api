@@ -93,13 +93,48 @@ jobs:
               $SERVICE_NAME:latest
             
             # 컨테이너 상태 확인
-            echo "Checking container status..."
+            echo "=== Container Status ==="
             sleep 5
-            docker ps | grep $SERVICE_NAME || echo "⚠️  Container not running"
-            docker logs $SERVICE_NAME --tail 50 || echo "⚠️  Could not fetch logs"
+            docker ps -a | grep $SERVICE_NAME || echo "⚠️  Container not found"
+            echo ""
+            
+            echo "=== Container Logs (last 100 lines) ==="
+            docker logs $SERVICE_NAME --tail 100 2>&1 || echo "⚠️  Could not fetch logs"
+            echo ""
+            
+            echo "=== Network Check ==="
+            netstat -tlnp | grep 8080 || ss -tlnp | grep 8080 || echo "⚠️  Port 8080 not listening"
             
             # 임시 파일 정리
             rm -f $SERVICE_NAME.tar.gz
+          ENDSSH
+
+      - name: Verify Container Status
+        env:
+          EC2_HOST: ${{ secrets.EC2_HOST }}
+          EC2_USER: ${{ secrets.EC2_USER }}
+          EC2_SSH_KEY: ${{ secrets.EC2_SSH_KEY }}
+          EC2_DEPLOY_PATH: ${{ secrets.EC2_DEPLOY_PATH || '/home/ubuntu/deploy' }}
+        run: |
+          mkdir -p ~/.ssh
+          echo "$EC2_SSH_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan -H $EC2_HOST >> ~/.ssh/known_hosts
+          
+          echo "=== Verifying container deployment ==="
+          ssh -i ~/.ssh/deploy_key $EC2_USER@$EC2_HOST << 'ENDSSH'
+            SERVICE_NAME="api-service"
+            
+            echo "Container status:"
+            docker ps -a | grep $SERVICE_NAME || echo "❌ Container not found"
+            echo ""
+            
+            echo "Recent container logs:"
+            docker logs $SERVICE_NAME --tail 30 2>&1 || echo "❌ Cannot read logs"
+            echo ""
+            
+            echo "Port binding:"
+            docker port $SERVICE_NAME 2>&1 || echo "❌ Cannot check port binding"
           ENDSSH
 
       - name: Health Check
@@ -127,11 +162,20 @@ jobs:
             fi
           done
           
-          echo "⚠️  Health check failed after $MAX_RETRIES attempts"
-          echo "Please check:"
-          echo "  1. EC2 security group allows inbound traffic on port 8080"
-          echo "  2. Container is running: ssh to EC2 and run 'docker ps'"
-          echo "  3. Container logs: ssh to EC2 and run 'docker logs api-service'"
-          echo "  4. Service might still be starting, check manually"
+          echo ""
+          echo "❌ Health check failed after $MAX_RETRIES attempts"
+          echo ""
+          echo "=== Troubleshooting Steps ==="
+          echo "1. Check EC2 security group - allow inbound traffic on port 8080"
+          echo "2. SSH to EC2 and verify container:"
+          echo "   docker ps -a | grep api-service"
+          echo "   docker logs api-service"
+          echo "3. Check if service is listening:"
+          echo "   docker exec api-service netstat -tlnp | grep 8080"
+          echo "4. Verify environment variables are set correctly"
+          echo "5. Service might need more time to start - check manually"
+          echo ""
+          echo "⚠️  Deployment completed but health check failed."
+          echo "⚠️  This may be a temporary issue. Please verify manually."
           exit 1
 
