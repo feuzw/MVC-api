@@ -1,0 +1,106 @@
+name: Deploy API Service to EC2
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - '**'
+      - '.github/workflows/deploy.yml'
+  workflow_dispatch:
+
+env:
+  SERVICE_NAME: api-service
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          java-version: '21'
+          distribution: 'temurin'
+
+      - name: Grant execute permission for gradlew
+        run: chmod +x gradlew
+
+      - name: Build with Gradle
+        run: ./gradlew build -x test
+
+      - name: Build Docker image
+        run: |
+          docker build -t ${{ env.SERVICE_NAME }}:${{ github.sha }} .
+          docker tag ${{ env.SERVICE_NAME }}:${{ github.sha }} ${{ env.SERVICE_NAME }}:latest
+
+      - name: Save Docker image
+        run: |
+          docker save ${{ env.SERVICE_NAME }}:latest | gzip > ${{ env.SERVICE_NAME }}.tar.gz
+
+      - name: Deploy to EC2
+        env:
+          EC2_HOST: ${{ secrets.EC2_HOST }}
+          EC2_USER: ${{ secrets.EC2_USER }}
+          EC2_SSH_KEY: ${{ secrets.EC2_SSH_KEY }}
+          EC2_DEPLOY_PATH: ${{ secrets.EC2_DEPLOY_PATH || '/home/ubuntu/deploy' }}
+        run: |
+          # SSH 키 설정
+          mkdir -p ~/.ssh
+          echo "$EC2_SSH_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan -H $EC2_HOST >> ~/.ssh/known_hosts
+
+          # EC2에 배포 디렉토리 생성
+          ssh -i ~/.ssh/deploy_key $EC2_USER@$EC2_HOST \
+            "mkdir -p $EC2_DEPLOY_PATH/${{ env.SERVICE_NAME }}"
+
+          # Docker 이미지 전송
+          scp -i ~/.ssh/deploy_key ${{ env.SERVICE_NAME }}.tar.gz \
+            $EC2_USER@$EC2_HOST:$EC2_DEPLOY_PATH/${{ env.SERVICE_NAME }}/
+
+          # EC2에서 Docker 이미지 로드 및 컨테이너 재시작
+          ssh -i ~/.ssh/deploy_key $EC2_USER@$EC2_HOST << 'ENDSSH'
+            DEPLOY_PATH="${{ secrets.EC2_DEPLOY_PATH || '/home/ubuntu/deploy' }}"
+            SERVICE_NAME="${{ env.SERVICE_NAME }}"
+            
+            cd $DEPLOY_PATH/$SERVICE_NAME
+            
+            # 기존 컨테이너 중지 및 제거
+            docker stop $SERVICE_NAME || true
+            docker rm $SERVICE_NAME || true
+            
+            # 새 이미지 로드
+            docker load -i $SERVICE_NAME.tar.gz
+            
+            # .env 파일 확인
+            if [ ! -f .env ]; then
+              echo "⚠️  .env file not found. Container will run without environment file."
+              ENV_FILE_ARG=""
+            else
+              ENV_FILE_ARG="--env-file .env"
+            fi
+            
+            # 컨테이너 실행
+            docker run -d \
+              --name $SERVICE_NAME \
+              --restart unless-stopped \
+              -p 8080:8080 \
+              $ENV_FILE_ARG \
+              $SERVICE_NAME:latest
+            
+            # 임시 파일 정리
+            rm -f $SERVICE_NAME.tar.gz
+          ENDSSH
+
+      - name: Health Check
+        env:
+          EC2_HOST: ${{ secrets.EC2_HOST }}
+        run: |
+          echo "Waiting for service to start..."
+          sleep 10
+          curl -f http://$EC2_HOST:8080/health || exit 1
+
