@@ -1,0 +1,106 @@
+spring:
+  application:
+    name: api
+  
+  # PostgreSQL (Neon DB) 설정
+  datasource:
+    url: ${DATABASE_URL:jdbc:postgresql://${DB_HOST:localhost}:${DB_PORT:5432}/${DB_NAME:neondb}?sslmode=require&channel_binding=require}
+    username: ${DB_USER:neondb_owner}
+    password: ${DB_PASSWORD:}
+    driver-class-name: org.postgresql.Driver
+    hikari:
+      maximum-pool-size: 10
+      minimum-idle: 2
+      connection-timeout: 30000
+      idle-timeout: 600000
+      max-lifetime: 1800000
+  
+  jpa:
+    hibernate:
+      ddl-auto: ${JPA_DDL_AUTO:validate} # validate, update, create, create-drop
+    show-sql: ${JPA_SHOW_SQL:false}
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.PostgreSQLDialect
+        format_sql: true
+        jdbc:
+          time_zone: Asia/Seoul
+  
+  # Redis 설정 (Upstash 클라우드 Redis 사용, 환경 변수로 오버라이드 가능)
+  data:
+    redis:
+      host: ${SPRING_DATA_REDIS_HOST:localhost}
+      port: ${SPRING_DATA_REDIS_PORT:6379}
+      password: ${SPRING_DATA_REDIS_PASSWORD:}
+      ssl:
+        enabled: ${SPRING_DATA_REDIS_SSL_ENABLED:false}
+      timeout: 2000ms
+      lettuce:
+        pool:
+          max-active: 8
+          max-idle: 8
+          min-idle: 0
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: "*"
+
+server:
+  port: 8080
+
+# OAuth 설정
+kakao:
+  client-id: ${KAKAO_REST_API_KEY}
+  redirect-uri: ${KAKAO_REDIRECT_URI}
+  auth-url: ${KAKAO_AUTH_URL:https://kauth.kakao.com}
+  api-url: ${KAKAO_API_URL:https://kapi.kakao.com}
+  frontend-url: ${FRONTEND_URL}
+
+google:
+  client-id: ${GOOGLE_CLIENT_ID}
+  client-secret: ${GOOGLE_CLIENT_SECRET}
+  redirect-uri: ${GOOGLE_REDIRECT_URI}
+  auth-url: ${GOOGLE_AUTH_URL:https://accounts.google.com/o/oauth2/v2/auth}
+  token-url: ${GOOGLE_TOKEN_URL:https://oauth2.googleapis.com/token}
+  api-url: ${GOOGLE_API_URL:https://www.googleapis.com/oauth2/v2}
+  frontend-url: ${FRONTEND_URL}
+
+naver:
+  client-id: ${NAVER_CLIENT_ID}
+  client-secret: ${NAVER_CLIENT_SECRET}
+  redirect-uri: ${NAVER_REDIRECT_URI}
+  auth-url: ${NAVER_AUTH_URL:https://nid.naver.com/oauth2.0/authorize}
+  token-url: ${NAVER_TOKEN_URL:https://nid.naver.com/oauth2.0/token}
+  api-url: ${NAVER_API_URL:https://openapi.naver.com/v1/nid}
+  frontend-url: ${FRONTEND_URL}
+
+# Cookie 설정
+cookie:
+  secure: ${COOKIE_SECURE:false}
+  same-site: ${COOKIE_SAME_SITE:Lax}
+
+# JWT 설정
+jwt:
+  secret: ${JWT_SECRET}
+  expiration: ${JWT_EXPIRATION:86400000} # 24시간 (밀리초) - 기본값 유지
+
+springdoc:
+  api-docs:
+    path: /api-docs
+  swagger-ui:
+    path: /docs
+    enabled: true
+  info:
+    title: API Gateway
+    version: 1.0.0
+    description: API Gateway Swagger Documentation
+
+# 로깅 설정
+logging:
+  level:
+    root: INFO
+    com.leeyujin: ${LOG_LEVEL:INFO}
+    org.springframework.cloud.gateway: ${GATEWAY_LOG_LEVEL:INFO}
+    org.springframework.data.redis: ${REDIS_LOG_LEVEL:INFO}

@@ -1,0 +1,55 @@
+# Gradle
+.gradle/
+build/
+!gradle/wrapper/gradle-wrapper.jar
+
+# IDE
+.idea/
+.vscode/
+*.iml
+*.ipr
+*.iws
+.sts4-cache/
+.apt_generated/
+.classpath
+.factorypath
+.project
+.settings/
+bin/
+out/
+
+# Logs
+*.log
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# Docker
+docker-compose.yaml
+Dockerfile.*
+*.dockerignore
+
+# Git
+.git/
+.gitignore
+
+# Documentation
+README.md
+HELP.md
+*.md
+
+# Test
+**/test/
+
+# Temporary files
+*.tmp
+*.bak
+*.swp
+*~
+

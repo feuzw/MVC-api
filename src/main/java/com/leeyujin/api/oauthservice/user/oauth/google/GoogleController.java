@@ -1,0 +1,208 @@
+package com.leeyujin.api.oauthservice.user.oauth.google;
+
+import com.leeyujin.api.oauthservice.user.oauth.OAuthTokenResponse;
+import com.leeyujin.api.oauthservice.user.oauth.OAuthUserInfo;
+import com.leeyujin.api.oauthservice.user.oauth.UserOAuthService;
+import com.leeyujin.api.oauthservice.common.jwt.JwtTokenProvider;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseCookie;
+import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.*;
+
+import java.net.URLEncoder;
+import java.nio.charset.StandardCharsets;
+import java.util.HashMap;
+import java.util.Map;
+
+@RestController
+@RequestMapping("/google")
+public class GoogleController {
+
+    @Autowired
+    private UserOAuthService userOAuthService;
+
+    @Autowired
+    private JwtTokenProvider jwtTokenProvider;
+
+    @Value("${google.frontend-url:http://localhost:3001}")
+    private String frontendUrl;
+
+    @Value("${cookie.secure:false}")
+    private boolean cookieSecure;
+
+    @Value("${cookie.same-site:Lax}")
+    private String cookieSameSite;
+
+    /**
+     * 구글 인가 코드로 로그인 처리 (콜백 엔드포인트)
+     * GET /api/auth/google/callback?code=xxxxx
+     * 
+     * 플로우:
+     * 1. 구글에서 인가 코드(code) 수신
+     * 2. 구글 API로 access token 요청
+     * 3. 구글 API로 사용자 정보 요청
+     * 4. JWT 토큰 생성
+     * 5. HttpOnly + Secure 쿠키로 JWT 설정
+     * 6. 프론트엔드로 302 Redirect
+     */
+    @GetMapping("/callback")
+    public ResponseEntity<Void> callback(@RequestParam String code) {
+        System.out.println("========================================");
+        System.out.println("[구글 로그인 시작] 인가 코드 수신: " + code);
+        System.out.println("========================================");
+
+        try {
+            // 1. 인가 코드로 액세스 토큰 요청
+            System.out.println("[1단계] 인가 코드로 액세스 토큰 요청 중...");
+            OAuthTokenResponse tokenResponse = userOAuthService.getAccessToken("google", code, null);
+
+            if (tokenResponse == null || tokenResponse.getAccessToken() == null) {
+                System.out.println("[실패] 액세스 토큰 발급 실패");
+                // 에러 발생 시 프론트엔드로 리다이렉트
+                String errorUrl = frontendUrl + "/?error=" +
+                        URLEncoder.encode("액세스 토큰 발급 실패", StandardCharsets.UTF_8);
+                return ResponseEntity.status(HttpStatus.FOUND)
+                        .header(HttpHeaders.LOCATION, errorUrl)
+                        .build();
+            }
+
+            String accessToken = tokenResponse.getAccessToken();
+            System.out.println(
+                    "[성공] 액세스 토큰 발급 완료: "
+                            + accessToken.substring(0, Math.min(20, accessToken.length()))
+                            + "...");
+
+            // 2. 액세스 토큰으로 사용자 정보 요청
+            System.out.println("[2단계] 액세스 토큰으로 사용자 정보 요청 중...");
+            OAuthUserInfo userInfo = userOAuthService.getUserInfo("google", accessToken);
+
+            if (userInfo == null || userInfo.getId() == null) {
+                System.out.println("[실패] 사용자 정보 조회 실패");
+                // 에러 발생 시 프론트엔드로 리다이렉트
+                String errorUrl = frontendUrl + "/?error=" +
+                        URLEncoder.encode("사용자 정보 조회 실패", StandardCharsets.UTF_8);
+                return ResponseEntity.status(HttpStatus.FOUND)
+                        .header(HttpHeaders.LOCATION, errorUrl)
+                        .build();
+            }
+
+            System.out.println("[성공] 사용자 정보 조회 완료 - 구글 ID: " + userInfo.getId());
+
+            // 3. 사용자 정보 파싱
+            System.out.println("[3단계] 사용자 정보 파싱 중...");
+            String googleId = userInfo.getId();
+            String email = userInfo.getEmail();
+            String nickname = userInfo.getNickname();
+
+            // 닉네임이 없으면 이메일 또는 ID 사용
+            if (nickname == null || nickname.isEmpty()) {
+                if (email != null && !email.isEmpty()) {
+                    nickname = email.split("@")[0];
+                } else {
+                    nickname = "구글사용자_" + googleId;
+                }
+            }
+
+            System.out.println(
+                    "[파싱 완료] 구글 ID: " + googleId + ", 닉네임: " + nickname + ", 이메일: "
+                            + (email != null ? email : "없음"));
+
+            // 4. JWT 토큰 생성 (구글 ID를 Long으로 변환 시도, 실패 시 해시값 사용)
+            System.out.println("[4단계] JWT 토큰 생성 중...");
+            Long userId;
+            try {
+                userId = Long.parseLong(googleId);
+            } catch (NumberFormatException e) {
+                // 구글 ID가 숫자가 아닌 경우 해시값 사용
+                userId = (long) googleId.hashCode();
+            }
+
+            String jwtToken = jwtTokenProvider.generateToken(
+                    userId,
+                    "google",
+                    email != null ? email : "",
+                    nickname);
+            System.out.println("[성공] JWT 토큰 생성 완료: "
+                    + jwtToken.substring(0, Math.min(30, jwtToken.length())) + "...");
+
+            // 5. HttpOnly + Secure 쿠키 생성
+            System.out.println("[5단계] 보안 쿠키 생성 중...");
+
+            // 쿠키 설정: HttpOnly, Secure, SameSite
+            // HttpOnly: JavaScript 접근 불가 (XSS 공격 방지)
+            // Secure: HTTPS에서만 전송 (프로덕션: true, 개발: false)
+            // SameSite: CSRF 공격 방지 (Lax: 같은 사이트, None: 다른 도메인 허용)
+            ResponseCookie cookie = ResponseCookie.from("token", jwtToken)
+                    .httpOnly(true)
+                    .secure(cookieSecure)
+                    .sameSite(cookieSameSite)
+                    .path("/")
+                    .maxAge(86400) // 24시간 (초 단위)
+                    .build();
+
+            // 프론트엔드 리다이렉트 URL 생성
+            String redirectUrl = frontendUrl + "/auth/google/callback?provider=google";
+
+            System.out.println("========================================");
+            System.out.println("[구글 로그인 성공]");
+            System.out.println("  - 구글 ID: " + googleId);
+            System.out.println("  - 닉네임: " + nickname);
+            System.out.println("  - 이메일: " + (email != null ? email : "없음"));
+            System.out.println("  - JWT 토큰: " + jwtToken.substring(0, Math.min(50, jwtToken.length()))
+                    + "...");
+            System.out.println("  - 리다이렉트 URL: " + redirectUrl);
+            System.out.println("  - 쿠키 설정: HttpOnly=true, Secure=" + cookieSecure + ", SameSite="
+                    + cookieSameSite);
+            System.out.println("========================================");
+
+            // 302 Redirect with HttpOnly Cookie
+            return ResponseEntity.status(HttpStatus.FOUND)
+                    .header(HttpHeaders.LOCATION, redirectUrl)
+                    .header(HttpHeaders.SET_COOKIE, cookie.toString())
+                    .build();
+
+        } catch (Exception e) {
+            System.err.println("========================================");
+            System.err.println("[구글 로그인 실패]");
+            System.err.println("오류 메시지: " + e.getMessage());
+            System.err.println("========================================");
+            e.printStackTrace();
+
+            // 에러 발생 시 프론트엔드로 리다이렉트
+            String errorUrl = frontendUrl + "/?error=" +
+                    URLEncoder.encode("구글 로그인 처리 중 오류가 발생했습니다: " + e.getMessage(),
+                            StandardCharsets.UTF_8);
+
+            return ResponseEntity.status(HttpStatus.FOUND)
+                    .header(HttpHeaders.LOCATION, errorUrl)
+                    .build();
+        }
+    }
+
+    /**
+     * 구글 인가 URL 반환
+     * GET /api/auth/google/login
+     */
+    @GetMapping("/login")
+    public ResponseEntity<Map<String, Object>> getAuthUrl() {
+        System.out.println("[구글 인가 URL 요청]");
+        try {
+            String authUrlWithParams = userOAuthService.getAuthUrl("google");
+
+            Map<String, Object> response = new HashMap<>();
+            response.put("success", true);
+            response.put("authUrl", authUrlWithParams);
+
+            System.out.println("[성공] 구글 인가 URL 생성 완료: " + authUrlWithParams);
+            return ResponseEntity.ok(response);
+        } catch (Exception e) {
+            return ResponseEntity.status(500).body(Map.of(
+                    "success", false,
+                    "message", "인가 URL 생성 실패: " + e.getMessage()));
+        }
+    }
+}
+
