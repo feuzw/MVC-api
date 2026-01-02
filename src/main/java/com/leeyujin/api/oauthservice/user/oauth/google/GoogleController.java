@@ -18,7 +18,7 @@ import java.util.HashMap;
 import java.util.Map;
 
 @RestController
-@RequestMapping("/google")
+@RequestMapping("/auth/google")
 public class GoogleController {
 
     @Autowired

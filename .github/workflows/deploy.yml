@@ -109,34 +109,6 @@ jobs:
             rm -f $SERVICE_NAME.tar.gz
           ENDSSH
 
-      - name: Verify Container Status
-        env:
-          EC2_HOST: ${{ secrets.EC2_HOST }}
-          EC2_USER: ${{ secrets.EC2_USER }}
-          EC2_SSH_KEY: ${{ secrets.EC2_SSH_KEY }}
-          EC2_DEPLOY_PATH: ${{ secrets.EC2_DEPLOY_PATH || '/home/ubuntu/deploy' }}
-        run: |
-          mkdir -p ~/.ssh
-          echo "$EC2_SSH_KEY" > ~/.ssh/deploy_key
-          chmod 600 ~/.ssh/deploy_key
-          ssh-keyscan -H $EC2_HOST >> ~/.ssh/known_hosts
-          
-          echo "=== Verifying container deployment ==="
-          ssh -i ~/.ssh/deploy_key $EC2_USER@$EC2_HOST << 'ENDSSH'
-            SERVICE_NAME="api-service"
-            
-            echo "Container status:"
-            docker ps -a | grep $SERVICE_NAME || echo "❌ Container not found"
-            echo ""
-            
-            echo "Recent container logs:"
-            docker logs $SERVICE_NAME --tail 30 2>&1 || echo "❌ Cannot read logs"
-            echo ""
-            
-            echo "Port binding:"
-            docker port $SERVICE_NAME 2>&1 || echo "❌ Cannot check port binding"
-          ENDSSH
-
       - name: Health Check
         env:
           EC2_HOST: ${{ secrets.EC2_HOST }}
@@ -174,8 +146,5 @@ jobs:
           echo "   docker exec api-service netstat -tlnp | grep 8080"
           echo "4. Verify environment variables are set correctly"
           echo "5. Service might need more time to start - check manually"
-          echo ""
-          echo "⚠️  Deployment completed but health check failed."
-          echo "⚠️  This may be a temporary issue. Please verify manually."
           exit 1
 

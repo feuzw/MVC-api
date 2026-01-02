@@ -18,7 +18,7 @@ import java.util.HashMap;
 import java.util.Map;
 
 @RestController
-@RequestMapping("/naver")
+@RequestMapping("/auth/naver")
 public class NaverController {
 
     @Autowired

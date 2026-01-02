@@ -18,7 +18,7 @@ import java.util.HashMap;
 import java.util.Map;
 
 @RestController
-@RequestMapping("/kakao")
+@RequestMapping("/auth/kakao")
 public class KakaoController {
 
         @Autowired
