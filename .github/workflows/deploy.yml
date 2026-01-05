@@ -260,23 +260,56 @@ jobs:
       - name: Health Check
         env:
           EC2_HOST: ${{ secrets.EC2_HOST }}
+          EC2_USER: ${{ secrets.EC2_USER }}
+          EC2_SSH_KEY: ${{ secrets.EC2_SSH_KEY }}
+          SERVICE_NAME: ${{ env.SERVICE_NAME }}
         run: |
           echo "Waiting for service to start..."
           echo "Service will be available at: http://$EC2_HOST:8080/health"
           
-          # 최대 60초 대기 (6번 재시도, 10초 간격)
-          MAX_RETRIES=6
+          # SSH 키 설정
+          mkdir -p ~/.ssh
+          echo "$EC2_SSH_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan -H $EC2_HOST >> ~/.ssh/known_hosts
+          
+          # 컨테이너 상태 사전 확인
+          echo ""
+          echo "=== Pre-Health Check: Container Status ==="
+          ssh -i ~/.ssh/deploy_key $EC2_USER@$EC2_HOST << 'PREHEALTH'
+            echo "Container status:"
+            docker ps -a | grep ${{ env.SERVICE_NAME }} || echo "Container not found"
+            echo ""
+            echo "Container logs (last 50 lines):"
+            docker logs ${{ env.SERVICE_NAME }} --tail 50 2>&1 || echo "Could not fetch logs"
+            echo ""
+            echo "Port 8080 check:"
+            netstat -tlnp | grep 8080 || ss -tlnp | grep 8080 || echo "Port 8080 not listening"
+          PREHEALTH
+          
+          # 최대 90초 대기 (9번 재시도, 10초 간격)
+          MAX_RETRIES=9
           RETRY_INTERVAL=10
           
           for i in $(seq 1 $MAX_RETRIES); do
+            echo ""
             echo "Health check attempt $i/$MAX_RETRIES..."
             
-            if curl -f -s --max-time 5 http://$EC2_HOST:8080/health > /dev/null 2>&1; then
-              echo "✅ Health check passed!"
+            # curl 상세 정보 출력
+            HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" --max-time 5 http://$EC2_HOST:8080/health 2>&1 || echo "000")
+            
+            if [ "$HTTP_CODE" = "200" ] || [ "$HTTP_CODE" = "204" ]; then
+              echo "✅ Health check passed! (HTTP $HTTP_CODE)"
               exit 0
             else
-              echo "⏳ Service not ready yet, waiting ${RETRY_INTERVAL}s..."
+              if [ "$HTTP_CODE" = "000" ]; then
+                echo "⏳ Connection failed (service may still be starting)"
+              else
+                echo "⏳ Service returned HTTP $HTTP_CODE (waiting for 200/204)"
+              fi
+              
               if [ $i -lt $MAX_RETRIES ]; then
+                echo "Waiting ${RETRY_INTERVAL}s before next attempt..."
                 sleep $RETRY_INTERVAL
               fi
             fi
@@ -285,14 +318,47 @@ jobs:
           echo ""
           echo "❌ Health check failed after $MAX_RETRIES attempts"
           echo ""
+          
+          # 실패 시 상세 진단 정보 수집
+          echo "=== Collecting Diagnostic Information ==="
+          ssh -i ~/.ssh/deploy_key $EC2_USER@$EC2_HOST << 'DIAGNOSTIC'
+            echo "=== Container Status ==="
+            docker ps -a | grep ${{ env.SERVICE_NAME }} || echo "Container not found"
+            echo ""
+            
+            echo "=== Container Logs (last 100 lines) ==="
+            docker logs ${{ env.SERVICE_NAME }} --tail 100 2>&1 || echo "Could not fetch logs"
+            echo ""
+            
+            echo "=== Container Exit Code ==="
+            docker inspect ${{ env.SERVICE_NAME }} --format='{{.State.ExitCode}}' 2>/dev/null || echo "Could not get exit code"
+            echo ""
+            
+            echo "=== Port 8080 Status ==="
+            netstat -tlnp | grep 8080 || ss -tlnp | grep 8080 || echo "Port 8080 not listening"
+            echo ""
+            
+            echo "=== Testing from inside container ==="
+            docker exec ${{ env.SERVICE_NAME }} curl -s http://localhost:8080/health 2>&1 || echo "Could not test from inside container"
+            echo ""
+            
+            echo "=== Network Interfaces ==="
+            docker inspect ${{ env.SERVICE_NAME }} --format='{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' 2>/dev/null || echo "Could not get network info"
+          DIAGNOSTIC
+          
+          echo ""
           echo "=== Troubleshooting Steps ==="
-          echo "1. Check EC2 security group - allow inbound traffic on port 8080"
-          echo "2. SSH to EC2 and verify container:"
-          echo "   docker ps -a | grep api-service"
-          echo "   docker logs api-service"
-          echo "3. Check if service is listening:"
-          echo "   docker exec api-service netstat -tlnp | grep 8080"
-          echo "4. Verify environment variables are set correctly"
-          echo "5. Service might need more time to start - check manually"
+          echo "1. Check EC2 security group - allow inbound traffic on port 8080 from 0.0.0.0/0"
+          echo "2. SSH to EC2 and check container logs:"
+          echo "   ssh $EC2_USER@$EC2_HOST"
+          echo "   docker logs ${{ env.SERVICE_NAME }}"
+          echo "3. Verify the /health endpoint exists in your application"
+          echo "4. Check if application needs more time to start (Spring Boot can take 30-60 seconds)"
+          echo "5. Verify environment variables are set correctly in .env file"
+          echo "6. Test from inside the container:"
+          echo "   docker exec ${{ env.SERVICE_NAME }} curl http://localhost:8080/health"
+          
+          # Health Check 실패해도 경고만 출력하고 계속 진행 (선택사항)
+          # exit 1을 주석 처리하면 Health Check 실패해도 배포는 성공으로 표시됨
           exit 1
 
