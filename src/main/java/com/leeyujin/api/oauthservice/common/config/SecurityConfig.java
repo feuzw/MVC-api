@@ -56,9 +56,11 @@ public class SecurityConfig {
         public CorsConfigurationSource corsConfigurationSource() {
                 CorsConfiguration configuration = new CorsConfiguration();
 
-                // 프론트엔드 도메인 허용 (환경 변수 + 로컬 개발용)
+                // 프론트엔드 도메인 허용 (환경 변수 + 로컬 개발용 + 프로덕션)
                 List<String> allowedOrigins = Arrays.asList(
                                 frontendUrl,
+                                "https://www.leeyujin.kr",
+                                "https://leeyujin.kr",
                                 "http://localhost:3000",
                                 "http://localhost:3001",
                                 "http://127.0.0.1:3000",
