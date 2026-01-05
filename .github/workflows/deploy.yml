@@ -98,11 +98,76 @@ jobs:
               exit 1
             fi
             
+            # 포트 8080을 사용하는 모든 컨테이너 확인 및 정리
+            echo ""
+            echo "=== Checking Port 8080 ==="
+            # 포트 8080을 사용하는 컨테이너 찾기 (docker ps 출력에서 직접 확인)
+            CONTAINERS_USING_PORT=\$(docker ps --format "table {{.Names}}\t{{.Ports}}" 2>/dev/null | grep "8080" | awk '{print \$1}' || echo "")
+            
+            if [ -n "\$CONTAINERS_USING_PORT" ]; then
+              echo "⚠️  Found containers using port 8080:"
+              echo "\$CONTAINERS_USING_PORT"
+              echo "\$CONTAINERS_USING_PORT" | while read container; do
+                if [ -n "\$container" ] && [ "\$container" != "NAMES" ]; then
+                  docker stop "\$container" 2>/dev/null && echo "✅ Stopped: \$container" || true
+                  docker rm "\$container" 2>/dev/null && echo "✅ Removed: \$container" || true
+                fi
+              done
+            else
+              echo "ℹ️  No running containers found using port 8080"
+            fi
+            
+            # 중지된 컨테이너 중에서도 포트 8080을 사용하는 것 확인
+            STOPPED_WITH_PORT=\$(docker ps -a --format "{{.Names}}" 2>/dev/null | while read name; do
+              if [ -n "\$name" ] && [ "\$name" != "\$SERVICE_NAME" ]; then
+                docker inspect "\$name" --format='{{range \$p, \$conf := .NetworkSettings.Ports}}{{if eq \$p "8080/tcp"}}\$name{{end}}{{end}}' 2>/dev/null
+              fi
+            done | grep -v "^$" || echo "")
+            
+            if [ -n "\$STOPPED_WITH_PORT" ]; then
+              echo "⚠️  Found stopped containers that used port 8080:"
+              echo "\$STOPPED_WITH_PORT"
+              echo "\$STOPPED_WITH_PORT" | while read container; do
+                if [ -n "\$container" ]; then
+                  docker rm "\$container" 2>/dev/null && echo "✅ Removed: \$container" || true
+                fi
+              done
+            fi
+            
+            echo "✅ Port 8080 cleanup completed"
+            
             # 기존 컨테이너 중지 및 제거
             echo ""
             echo "=== Stopping Existing Container ==="
             docker stop \$SERVICE_NAME 2>/dev/null && echo "✅ Stopped existing container" || echo "ℹ️  No existing container to stop"
             docker rm \$SERVICE_NAME 2>/dev/null && echo "✅ Removed existing container" || echo "ℹ️  No existing container to remove"
+            
+            # 포트 8080이 실제로 사용 가능한지 확인
+            echo ""
+            echo "=== Verifying Port 8080 Availability ==="
+            if command -v netstat >/dev/null 2>&1; then
+              PORT_CHECK=\$(netstat -tlnp 2>/dev/null | grep ":8080 " || echo "")
+            elif command -v ss >/dev/null 2>&1; then
+              PORT_CHECK=\$(ss -tlnp 2>/dev/null | grep ":8080 " || echo "")
+            else
+              PORT_CHECK=""
+            fi
+            
+            if [ -n "\$PORT_CHECK" ]; then
+              echo "⚠️  Port 8080 is still in use:"
+              echo "\$PORT_CHECK"
+              echo "Attempting to find and stop the process..."
+              # 포트를 사용하는 프로세스 찾기 (Docker 컨테이너가 아닌 경우)
+              if command -v lsof >/dev/null 2>&1; then
+                PID=\$(lsof -ti:8080 2>/dev/null || echo "")
+                if [ -n "\$PID" ]; then
+                  echo "Found process using port 8080: PID \$PID"
+                  kill -9 \$PID 2>/dev/null && echo "✅ Killed process \$PID" || echo "⚠️  Could not kill process \$PID"
+                fi
+              fi
+            else
+              echo "✅ Port 8080 is available"
+            fi
             
             # 기존 이미지 제거 (선택사항, 디스크 공간 확보)
             echo ""
