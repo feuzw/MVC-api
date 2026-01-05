@@ -55,6 +55,41 @@ jobs:
           EC2_DEPLOY_PATH: ${{ secrets.EC2_DEPLOY_PATH || '/home/ubuntu/deploy' }}
           DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
           DOCKER_PASSWORD: ${{ secrets.DOCKER_PASSWORD }}
+          # Application Environment Variables
+          JWT_SECRET: ${{ secrets.JWT_SECRET }}
+          JWT_EXPIRATION: ${{ secrets.JWT_EXPIRATION }}
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          DB_HOST: ${{ secrets.DB_HOST }}
+          DB_PORT: ${{ secrets.DB_PORT }}
+          DB_NAME: ${{ secrets.DB_NAME }}
+          DB_USER: ${{ secrets.DB_USER }}
+          DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
+          # OAuth - Kakao
+          KAKAO_REST_API_KEY: ${{ secrets.KAKAO_REST_API_KEY }}
+          KAKAO_REDIRECT_URI: ${{ secrets.KAKAO_REDIRECT_URI }}
+          # OAuth - Google
+          GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
+          GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
+          GOOGLE_REDIRECT_URI: ${{ secrets.GOOGLE_REDIRECT_URI }}
+          # OAuth - Naver
+          NAVER_CLIENT_ID: ${{ secrets.NAVER_CLIENT_ID }}
+          NAVER_CLIENT_SECRET: ${{ secrets.NAVER_CLIENT_SECRET }}
+          NAVER_REDIRECT_URI: ${{ secrets.NAVER_REDIRECT_URI }}
+          # Frontend
+          FRONTEND_URL: ${{ secrets.FRONTEND_URL }}
+          # Cookie Settings
+          COOKIE_SECURE: ${{ secrets.COOKIE_SECURE }}
+          COOKIE_SAME_SITE: ${{ secrets.COOKIE_SAME_SITE }}
+          # Redis (Upstash)
+          UPSTASH_REDIS_HOST: ${{ secrets.UPSTASH_REDIS_HOST }}
+          UPSTASH_REDIS_PORT: ${{ secrets.UPSTASH_REDIS_PORT }}
+          UPSTASH_REDIS_PASSWORD: ${{ secrets.UPSTASH_REDIS_PASSWORD }}
+          UPSTASH_REDIS_SSL_ENABLED: ${{ secrets.UPSTASH_REDIS_SSL_ENABLED || secrets.UPSTASH_REDIS_SSL }}
+          # JPA Settings
+          JPA_DDL_AUTO: ${{ secrets.JPA_DDL_AUTO }}
+          JPA_SHOW_SQL: ${{ secrets.JPA_SHOW_SQL }}
+          # Optional
+          LOG_LEVEL: ${{ secrets.LOG_LEVEL }}
         run: |
           # SSH 키 설정
           mkdir -p ~/.ssh
@@ -65,6 +100,48 @@ jobs:
           # EC2에 배포 디렉토리 생성
           ssh -i ~/.ssh/deploy_key $EC2_USER@$EC2_HOST \
             "mkdir -p $EC2_DEPLOY_PATH/${{ env.SERVICE_NAME }}"
+
+          # .env 파일 생성 (GitHub Secrets에서)
+          echo "=== Creating .env file from GitHub Secrets ==="
+          cat > /tmp/.env << EOF
+JWT_SECRET=$JWT_SECRET
+JWT_EXPIRATION=$JWT_EXPIRATION
+DATABASE_URL=$DATABASE_URL
+DB_HOST=$DB_HOST
+DB_PORT=$DB_PORT
+DB_NAME=$DB_NAME
+DB_USER=$DB_USER
+DB_PASSWORD=$DB_PASSWORD
+KAKAO_REST_API_KEY=$KAKAO_REST_API_KEY
+KAKAO_REDIRECT_URI=$KAKAO_REDIRECT_URI
+GOOGLE_CLIENT_ID=$GOOGLE_CLIENT_ID
+GOOGLE_CLIENT_SECRET=$GOOGLE_CLIENT_SECRET
+GOOGLE_REDIRECT_URI=$GOOGLE_REDIRECT_URI
+NAVER_CLIENT_ID=$NAVER_CLIENT_ID
+NAVER_CLIENT_SECRET=$NAVER_CLIENT_SECRET
+NAVER_REDIRECT_URI=$NAVER_REDIRECT_URI
+FRONTEND_URL=$FRONTEND_URL
+COOKIE_SECURE=$COOKIE_SECURE
+COOKIE_SAME_SITE=$COOKIE_SAME_SITE
+UPSTASH_REDIS_HOST=$UPSTASH_REDIS_HOST
+UPSTASH_REDIS_PORT=$UPSTASH_REDIS_PORT
+UPSTASH_REDIS_PASSWORD=$UPSTASH_REDIS_PASSWORD
+UPSTASH_REDIS_SSL_ENABLED=$UPSTASH_REDIS_SSL_ENABLED
+JPA_DDL_AUTO=$JPA_DDL_AUTO
+JPA_SHOW_SQL=$JPA_SHOW_SQL
+LOG_LEVEL=$LOG_LEVEL
+EOF
+
+          # .env 파일을 EC2에 전송
+          scp -i ~/.ssh/deploy_key /tmp/.env \
+            $EC2_USER@$EC2_HOST:$EC2_DEPLOY_PATH/${{ env.SERVICE_NAME }}/.env
+
+          # EC2에서 .env 파일 권한 설정
+          ssh -i ~/.ssh/deploy_key $EC2_USER@$EC2_HOST \
+            "chmod 600 $EC2_DEPLOY_PATH/${{ env.SERVICE_NAME }}/.env"
+
+          # 임시 파일 삭제
+          rm -f /tmp/.env
 
           # EC2에서 Docker Hub에서 이미지 pull 및 컨테이너 재시작
           ssh -i ~/.ssh/deploy_key $EC2_USER@$EC2_HOST << ENDSSH
@@ -199,14 +276,36 @@ jobs:
               exit 1
             fi
             
-            # .env 파일 확인
+            # .env 파일 확인 및 검증
             echo ""
-            echo "=== Checking .env file ==="
+            echo "=== Verifying .env file ==="
             if [ ! -f .env ]; then
-              echo "⚠️  .env file not found. Container will run without environment file."
-              ENV_FILE_ARG=""
+              echo "❌ .env file not found after creation!"
+              exit 1
             else
-              echo "✅ .env file found"
+              echo "✅ .env file exists"
+              echo "Checking for required variables..."
+              
+              # 필수 환경 변수 확인
+              MISSING_VARS=""
+              if ! grep -q "^JWT_SECRET=" .env 2>/dev/null || grep -q "^JWT_SECRET=$" .env 2>/dev/null; then
+                MISSING_VARS="JWT_SECRET"
+              fi
+              
+              if [ -n "\$MISSING_VARS" ]; then
+                echo "⚠️  WARNING: Missing or empty required environment variables: \$MISSING_VARS"
+                echo "⚠️  Please set these variables in GitHub Secrets"
+                echo "Application may fail to start!"
+              else
+                echo "✅ Required environment variables found"
+              fi
+              
+              # .env 파일 내용 확인 (값은 마스킹)
+              echo ""
+              echo "=== .env file variables (values masked) ==="
+              grep -E "^[A-Z_]+=" .env | sed 's/=.*/=***/' | head -10
+              echo "..."
+              
               ENV_FILE_ARG="--env-file .env"
             fi
             
