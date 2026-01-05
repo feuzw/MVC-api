@@ -68,47 +68,121 @@ jobs:
 
           # EC2에서 Docker Hub에서 이미지 pull 및 컨테이너 재시작
           ssh -i ~/.ssh/deploy_key $EC2_USER@$EC2_HOST << ENDSSH
+            set -e  # 에러 발생 시 스크립트 중단
+            
             DEPLOY_PATH="$EC2_DEPLOY_PATH"
             SERVICE_NAME="${{ env.SERVICE_NAME }}"
             DOCKER_USERNAME="$DOCKER_USERNAME"
             DOCKER_PASSWORD="$DOCKER_PASSWORD"
             
-            cd \$DEPLOY_PATH/\$SERVICE_NAME
+            echo "=== Deployment Variables ==="
+            echo "DEPLOY_PATH: \$DEPLOY_PATH"
+            echo "SERVICE_NAME: \$SERVICE_NAME"
+            echo "DOCKER_USERNAME: \$DOCKER_USERNAME"
+            echo ""
+            
+            # 배포 디렉토리로 이동
+            cd \$DEPLOY_PATH/\$SERVICE_NAME || {
+              echo "❌ Failed to change directory to \$DEPLOY_PATH/\$SERVICE_NAME"
+              exit 1
+            }
+            echo "✅ Changed to directory: \$(pwd)"
             
             # Docker Hub 로그인
-            echo "\$DOCKER_PASSWORD" | docker login -u "\$DOCKER_USERNAME" --password-stdin
+            echo ""
+            echo "=== Docker Hub Login ==="
+            if echo "\$DOCKER_PASSWORD" | docker login -u "\$DOCKER_USERNAME" --password-stdin; then
+              echo "✅ Docker Hub login successful"
+            else
+              echo "❌ Docker Hub login failed"
+              exit 1
+            fi
             
             # 기존 컨테이너 중지 및 제거
-            docker stop \$SERVICE_NAME || true
-            docker rm \$SERVICE_NAME || true
+            echo ""
+            echo "=== Stopping Existing Container ==="
+            docker stop \$SERVICE_NAME 2>/dev/null && echo "✅ Stopped existing container" || echo "ℹ️  No existing container to stop"
+            docker rm \$SERVICE_NAME 2>/dev/null && echo "✅ Removed existing container" || echo "ℹ️  No existing container to remove"
             
             # 기존 이미지 제거 (선택사항, 디스크 공간 확보)
-            docker rmi \$DOCKER_USERNAME/\$SERVICE_NAME:latest || true
+            echo ""
+            echo "=== Removing Old Image ==="
+            docker rmi \$DOCKER_USERNAME/\$SERVICE_NAME:latest 2>/dev/null && echo "✅ Removed old image" || echo "ℹ️  No old image to remove"
             
             # Docker Hub에서 최신 이미지 pull
-            docker pull \$DOCKER_USERNAME/\$SERVICE_NAME:latest
+            echo ""
+            echo "=== Pulling Image from Docker Hub ==="
+            IMAGE_NAME="\$DOCKER_USERNAME/\$SERVICE_NAME:latest"
+            echo "Pulling: \$IMAGE_NAME"
+            if docker pull \$IMAGE_NAME; then
+              echo "✅ Image pulled successfully"
+            else
+              echo "❌ Failed to pull image: \$IMAGE_NAME"
+              echo "Available images:"
+              docker images | grep \$SERVICE_NAME || echo "No images found"
+              exit 1
+            fi
+            
+            # 이미지 확인
+            echo ""
+            echo "=== Verifying Image ==="
+            if docker images | grep -q "\$DOCKER_USERNAME/\$SERVICE_NAME.*latest"; then
+              echo "✅ Image exists:"
+              docker images | grep "\$DOCKER_USERNAME/\$SERVICE_NAME"
+            else
+              echo "❌ Image not found after pull"
+              exit 1
+            fi
             
             # .env 파일 확인
+            echo ""
+            echo "=== Checking .env file ==="
             if [ ! -f .env ]; then
               echo "⚠️  .env file not found. Container will run without environment file."
               ENV_FILE_ARG=""
             else
+              echo "✅ .env file found"
               ENV_FILE_ARG="--env-file .env"
             fi
             
             # 컨테이너 실행
-            docker run -d \
+            echo ""
+            echo "=== Starting Container ==="
+            echo "Command: docker run -d --name \$SERVICE_NAME --restart unless-stopped -p 8080:8080 \$ENV_FILE_ARG \$IMAGE_NAME"
+            if docker run -d \
               --name \$SERVICE_NAME \
               --restart unless-stopped \
               -p 8080:8080 \
               \$ENV_FILE_ARG \
-              \$DOCKER_USERNAME/\$SERVICE_NAME:latest
+              \$IMAGE_NAME; then
+              echo "✅ Container started successfully"
+            else
+              echo "❌ Failed to start container"
+              echo "Checking for errors..."
+              docker images | grep \$SERVICE_NAME
+              exit 1
+            fi
             
             # 컨테이너 상태 확인
+            echo ""
             echo "=== Container Status ==="
             sleep 5
             docker ps -a | grep \$SERVICE_NAME || echo "⚠️  Container not found"
             echo ""
+            
+            # 컨테이너가 실행 중인지 확인
+            if docker ps | grep -q \$SERVICE_NAME; then
+              echo "✅ Container is running"
+            else
+              echo "❌ Container is not running!"
+              echo ""
+              echo "=== Checking stopped container ==="
+              docker ps -a | grep \$SERVICE_NAME
+              echo ""
+              echo "=== Container Exit Code ==="
+              docker inspect \$SERVICE_NAME --format='{{.State.ExitCode}}' 2>/dev/null || echo "Could not get exit code"
+              echo ""
+            fi
             
             echo "=== Container Logs (last 100 lines) ==="
             docker logs \$SERVICE_NAME --tail 100 2>&1 || echo "⚠️  Could not fetch logs"
