@@ -265,7 +265,8 @@ jobs:
           SERVICE_NAME: ${{ env.SERVICE_NAME }}
         run: |
           echo "Waiting for service to start..."
-          echo "Service will be available at: http://$EC2_HOST:8080/health"
+          echo "Service will be available at: http://$EC2_HOST:8080/actuator/health"
+          echo "Also trying: http://$EC2_HOST:8080/health"
           
           # SSH 키 설정
           mkdir -p ~/.ssh
@@ -295,21 +296,27 @@ jobs:
             echo ""
             echo "Health check attempt $i/$MAX_RETRIES..."
             
-            # curl 상세 정보 출력
-            HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" --max-time 5 http://$EC2_HOST:8080/health 2>&1 || echo "000")
+            # /actuator/health 시도 (Spring Boot Actuator 기본 경로)
+            HTTP_CODE_ACTUATOR=$(curl -s -o /dev/null -w "%{http_code}" --max-time 5 http://$EC2_HOST:8080/actuator/health 2>&1 || echo "000")
             
-            if [ "$HTTP_CODE" = "200" ] || [ "$HTTP_CODE" = "204" ]; then
-              echo "✅ Health check passed! (HTTP $HTTP_CODE)"
+            # /health도 시도 (커스텀 엔드포인트일 수 있음)
+            HTTP_CODE_ROOT=$(curl -s -o /dev/null -w "%{http_code}" --max-time 5 http://$EC2_HOST:8080/health 2>&1 || echo "000")
+            
+            # 둘 중 하나라도 성공하면 OK
+            if [ "$HTTP_CODE_ACTUATOR" = "200" ] || [ "$HTTP_CODE_ACTUATOR" = "204" ]; then
+              echo "✅ Health check passed! (/actuator/health returned HTTP $HTTP_CODE_ACTUATOR)"
+              exit 0
+            elif [ "$HTTP_CODE_ROOT" = "200" ] || [ "$HTTP_CODE_ROOT" = "204" ]; then
+              echo "✅ Health check passed! (/health returned HTTP $HTTP_CODE_ROOT)"
               exit 0
             else
-              if [ "$HTTP_CODE" = "000" ]; then
-                echo "⏳ Connection failed (service may still be starting)"
-              else
-                echo "⏳ Service returned HTTP $HTTP_CODE (waiting for 200/204)"
+              echo "⏳ /actuator/health: HTTP $HTTP_CODE_ACTUATOR, /health: HTTP $HTTP_CODE_ROOT"
+              if [ "$HTTP_CODE_ACTUATOR" = "000" ] && [ "$HTTP_CODE_ROOT" = "000" ]; then
+                echo "   Connection failed (service may still be starting or security group blocking)"
               fi
               
               if [ $i -lt $MAX_RETRIES ]; then
-                echo "Waiting ${RETRY_INTERVAL}s before next attempt..."
+                echo "   Waiting ${RETRY_INTERVAL}s before next attempt..."
                 sleep $RETRY_INTERVAL
               fi
             fi
@@ -339,7 +346,25 @@ jobs:
             echo ""
             
             echo "=== Testing from inside container ==="
-            docker exec ${{ env.SERVICE_NAME }} curl -s http://localhost:8080/health 2>&1 || echo "Could not test from inside container"
+            # curl이 없을 수 있으므로 여러 방법 시도
+            docker exec ${{ env.SERVICE_NAME }} curl -s http://localhost:8080/health 2>&1 || \
+            docker exec ${{ env.SERVICE_NAME }} wget -q -O- http://localhost:8080/health 2>&1 || \
+            docker exec ${{ env.SERVICE_NAME }} nc -zv localhost 8080 2>&1 || \
+            echo "Could not test from inside container (curl/wget/nc not available)"
+            echo ""
+            
+            echo "=== Testing from host (via container IP) ==="
+            CONTAINER_IP=$(docker inspect ${{ env.SERVICE_NAME }} --format='{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' 2>/dev/null || echo "")
+            if [ -n "$CONTAINER_IP" ]; then
+              echo "Container IP: $CONTAINER_IP"
+              curl -s -o /dev/null -w "HTTP Status: %{http_code}\n" --max-time 5 http://$CONTAINER_IP:8080/health 2>&1 || echo "Could not connect to container IP"
+            else
+              echo "Could not get container IP"
+            fi
+            echo ""
+            
+            echo "=== Application Logs (looking for 'Started' message) ==="
+            docker logs ${{ env.SERVICE_NAME }} 2>&1 | grep -i "started" | tail -5 || echo "No 'Started' message found"
             echo ""
             
             echo "=== Network Interfaces ==="
