@@ -1,0 +1,217 @@
+name: Build & Push API Image to DockerHub
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+env:
+  IMAGE_NAME: ${{ secrets.DOCKER_USERNAME }}/api-service
+  SERVICE_NAME: api-service
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to DockerHub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./Dockerfile
+          push: true
+          tags: |
+            ${{ env.IMAGE_NAME }}:latest
+            ${{ env.IMAGE_NAME }}:${{ github.sha }}
+
+      - name: Deploy to EC2
+        env:
+          EC2_HOST: ${{ secrets.EC2_HOST }}
+          EC2_USER: ${{ secrets.EC2_USER }}
+          EC2_SSH_KEY: ${{ secrets.EC2_SSH_KEY }}
+          EC2_DEPLOY_PATH: ${{ secrets.EC2_DEPLOY_PATH || '/home/ubuntu/deploy' }}
+          DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
+          DOCKER_PASSWORD: ${{ secrets.DOCKER_PASSWORD }}
+          # Application Environment Variables
+          JWT_SECRET: ${{ secrets.JWT_SECRET }}
+          JWT_EXPIRATION: ${{ secrets.JWT_EXPIRATION }}
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          DB_HOST: ${{ secrets.DB_HOST }}
+          DB_PORT: ${{ secrets.DB_PORT }}
+          DB_NAME: ${{ secrets.DB_NAME }}
+          DB_USER: ${{ secrets.DB_USER }}
+          DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
+          KAKAO_REST_API_KEY: ${{ secrets.KAKAO_REST_API_KEY }}
+          KAKAO_REDIRECT_URI: ${{ secrets.KAKAO_REDIRECT_URI }}
+          GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
+          GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
+          GOOGLE_REDIRECT_URI: ${{ secrets.GOOGLE_REDIRECT_URI }}
+          NAVER_CLIENT_ID: ${{ secrets.NAVER_CLIENT_ID }}
+          NAVER_CLIENT_SECRET: ${{ secrets.NAVER_CLIENT_SECRET }}
+          NAVER_REDIRECT_URI: ${{ secrets.NAVER_REDIRECT_URI }}
+          FRONTEND_URL: ${{ secrets.FRONTEND_URL }}
+          COOKIE_SECURE: ${{ secrets.COOKIE_SECURE }}
+          COOKIE_SAME_SITE: ${{ secrets.COOKIE_SAME_SITE }}
+          UPSTASH_REDIS_HOST: ${{ secrets.UPSTASH_REDIS_HOST }}
+          UPSTASH_REDIS_PORT: ${{ secrets.UPSTASH_REDIS_PORT }}
+          UPSTASH_REDIS_PASSWORD: ${{ secrets.UPSTASH_REDIS_PASSWORD }}
+          UPSTASH_REDIS_SSL_ENABLED: ${{ secrets.UPSTASH_REDIS_SSL_ENABLED || secrets.UPSTASH_REDIS_SSL }}
+          JPA_DDL_AUTO: ${{ secrets.JPA_DDL_AUTO }}
+          JPA_SHOW_SQL: ${{ secrets.JPA_SHOW_SQL }}
+          LOG_LEVEL: ${{ secrets.LOG_LEVEL }}
+        run: |
+          # SSH 키 설정
+          mkdir -p ~/.ssh
+          echo "$EC2_SSH_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan -H $EC2_HOST >> ~/.ssh/known_hosts
+
+          # EC2에 배포 디렉토리 생성
+          ssh -i ~/.ssh/deploy_key $EC2_USER@$EC2_HOST \
+            "mkdir -p $EC2_DEPLOY_PATH/${{ env.SERVICE_NAME }}"
+
+          # .env 파일 생성 (GitHub Secrets에서)
+          echo "=== Creating .env file from GitHub Secrets ==="
+          printf "JWT_SECRET=%s\nJWT_EXPIRATION=%s\nDATABASE_URL=%s\nDB_HOST=%s\nDB_PORT=%s\nDB_NAME=%s\nDB_USER=%s\nDB_PASSWORD=%s\nKAKAO_REST_API_KEY=%s\nKAKAO_REDIRECT_URI=%s\nGOOGLE_CLIENT_ID=%s\nGOOGLE_CLIENT_SECRET=%s\nGOOGLE_REDIRECT_URI=%s\nNAVER_CLIENT_ID=%s\nNAVER_CLIENT_SECRET=%s\nNAVER_REDIRECT_URI=%s\nFRONTEND_URL=%s\nCOOKIE_SECURE=%s\nCOOKIE_SAME_SITE=%s\nUPSTASH_REDIS_HOST=%s\nUPSTASH_REDIS_PORT=%s\nUPSTASH_REDIS_PASSWORD=%s\nUPSTASH_REDIS_SSL_ENABLED=%s\nJPA_DDL_AUTO=%s\nJPA_SHOW_SQL=%s\nLOG_LEVEL=%s\n" \
+            "${JWT_SECRET}" \
+            "${JWT_EXPIRATION}" \
+            "${DATABASE_URL}" \
+            "${DB_HOST}" \
+            "${DB_PORT}" \
+            "${DB_NAME}" \
+            "${DB_USER}" \
+            "${DB_PASSWORD}" \
+            "${KAKAO_REST_API_KEY}" \
+            "${KAKAO_REDIRECT_URI}" \
+            "${GOOGLE_CLIENT_ID}" \
+            "${GOOGLE_CLIENT_SECRET}" \
+            "${GOOGLE_REDIRECT_URI}" \
+            "${NAVER_CLIENT_ID}" \
+            "${NAVER_CLIENT_SECRET}" \
+            "${NAVER_REDIRECT_URI}" \
+            "${FRONTEND_URL}" \
+            "${COOKIE_SECURE}" \
+            "${COOKIE_SAME_SITE}" \
+            "${UPSTASH_REDIS_HOST}" \
+            "${UPSTASH_REDIS_PORT}" \
+            "${UPSTASH_REDIS_PASSWORD}" \
+            "${UPSTASH_REDIS_SSL_ENABLED}" \
+            "${JPA_DDL_AUTO}" \
+            "${JPA_SHOW_SQL}" \
+            "${LOG_LEVEL}" > /tmp/.env
+
+          # .env 파일을 EC2에 전송
+          scp -i ~/.ssh/deploy_key /tmp/.env \
+            $EC2_USER@$EC2_HOST:$EC2_DEPLOY_PATH/${{ env.SERVICE_NAME }}/.env
+
+          # EC2에서 .env 파일 권한 설정
+          ssh -i ~/.ssh/deploy_key $EC2_USER@$EC2_HOST \
+            "chmod 600 $EC2_DEPLOY_PATH/${{ env.SERVICE_NAME }}/.env"
+
+          # 임시 파일 삭제
+          rm -f /tmp/.env
+
+          # EC2에서 Docker Hub에서 이미지 pull 및 컨테이너 재시작
+          ssh -i ~/.ssh/deploy_key $EC2_USER@$EC2_HOST << ENDSSH
+            set -e
+            
+            DEPLOY_PATH="$EC2_DEPLOY_PATH"
+            SERVICE_NAME="${{ env.SERVICE_NAME }}"
+            DOCKER_USERNAME="$DOCKER_USERNAME"
+            DOCKER_PASSWORD="$DOCKER_PASSWORD"
+            IMAGE_NAME="${{ env.IMAGE_NAME }}"
+            
+            cd \$DEPLOY_PATH/\$SERVICE_NAME
+            
+            # Docker Hub 로그인
+            echo "\$DOCKER_PASSWORD" | docker login -u "\$DOCKER_USERNAME" --password-stdin
+            
+            # 포트 8080을 사용하는 컨테이너 정리
+            CONTAINERS_USING_PORT=\$(docker ps --format "table {{.Names}}\t{{.Ports}}" 2>/dev/null | grep "8080" | awk '{print \$1}' || echo "")
+            if [ -n "\$CONTAINERS_USING_PORT" ]; then
+              echo "\$CONTAINERS_USING_PORT" | while read container; do
+                if [ -n "\$container" ] && [ "\$container" != "NAMES" ]; then
+                  docker stop "\$container" 2>/dev/null || true
+                  docker rm "\$container" 2>/dev/null || true
+                fi
+              done
+            fi
+            
+            # 기존 컨테이너 중지 및 제거
+            docker stop \$SERVICE_NAME 2>/dev/null || true
+            docker rm \$SERVICE_NAME 2>/dev/null || true
+            
+            # Docker Hub에서 최신 이미지 pull
+            docker pull \$IMAGE_NAME:latest
+            
+            # .env 파일 확인
+            if [ -f .env ]; then
+              ENV_FILE_ARG="--env-file .env"
+            else
+              ENV_FILE_ARG=""
+            fi
+            
+            # 컨테이너 실행
+            docker run -d \
+              --name \$SERVICE_NAME \
+              --restart unless-stopped \
+              -p 8080:8080 \
+              \$ENV_FILE_ARG \
+              \$IMAGE_NAME:latest
+            
+            # 컨테이너 상태 확인
+            sleep 5
+            docker ps -a | grep \$SERVICE_NAME || echo "Container not found"
+            docker logs \$SERVICE_NAME --tail 50 2>&1 || echo "Could not fetch logs"
+          ENDSSH
+
+      - name: Health Check
+        env:
+          EC2_HOST: ${{ secrets.EC2_HOST }}
+        run: |
+          echo "Waiting for service to start..."
+          echo "Service will be available at: http://$EC2_HOST:8080/actuator/health"
+          
+          MAX_RETRIES=9
+          RETRY_INTERVAL=10
+          
+          for i in $(seq 1 $MAX_RETRIES); do
+            echo ""
+            echo "Health check attempt $i/$MAX_RETRIES..."
+            
+            HTTP_CODE_ACTUATOR=$(curl -s -o /dev/null -w "%{http_code}" --max-time 5 http://$EC2_HOST:8080/actuator/health 2>&1 || echo "000")
+            HTTP_CODE_ROOT=$(curl -s -o /dev/null -w "%{http_code}" --max-time 5 http://$EC2_HOST:8080/health 2>&1 || echo "000")
+            
+            if [ "$HTTP_CODE_ACTUATOR" = "200" ] || [ "$HTTP_CODE_ACTUATOR" = "204" ]; then
+              echo "✅ Health check passed! (/actuator/health returned HTTP $HTTP_CODE_ACTUATOR)"
+              exit 0
+            elif [ "$HTTP_CODE_ROOT" = "200" ] || [ "$HTTP_CODE_ROOT" = "204" ]; then
+              echo "✅ Health check passed! (/health returned HTTP $HTTP_CODE_ROOT)"
+              exit 0
+            else
+              echo "⏳ /actuator/health: HTTP $HTTP_CODE_ACTUATOR, /health: HTTP $HTTP_CODE_ROOT"
+              if [ $i -lt $MAX_RETRIES ]; then
+                echo "   Waiting ${RETRY_INTERVAL}s before next attempt..."
+                sleep $RETRY_INTERVAL
+              fi
+            fi
+          done
+          
+          echo ""
+          echo "❌ Health check failed after $MAX_RETRIES attempts"
+          echo "Check container logs: docker logs ${{ env.SERVICE_NAME }}"
+          exit 1
+
