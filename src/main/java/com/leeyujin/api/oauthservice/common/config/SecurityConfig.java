@@ -1,5 +1,6 @@
 package com.leeyujin.api.oauthservice.common.config;
 
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
@@ -11,10 +12,14 @@ import org.springframework.web.cors.CorsConfigurationSource;
 import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
 
 import java.util.Arrays;
+import java.util.List;
 
 @Configuration
 @EnableWebSecurity
 public class SecurityConfig {
+
+        @Value("${FRONTEND_URL:${kakao.frontend-url:http://localhost:3000}}")
+        private String frontendUrl;
 
         @Bean
         public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
@@ -25,6 +30,7 @@ public class SecurityConfig {
                                                 .sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                                 .authorizeHttpRequests(auth -> auth
                                                 .requestMatchers(
+                                                                "/",
                                                                 "/auth/google/**",
                                                                 "/auth/kakao/**",
                                                                 "/auth/naver/**",
@@ -50,12 +56,14 @@ public class SecurityConfig {
         public CorsConfigurationSource corsConfigurationSource() {
                 CorsConfiguration configuration = new CorsConfiguration();
 
-                // 프론트엔드 도메인 허용
-                configuration.setAllowedOrigins(Arrays.asList(
+                // 프론트엔드 도메인 허용 (환경 변수 + 로컬 개발용)
+                List<String> allowedOrigins = Arrays.asList(
+                                frontendUrl,
                                 "http://localhost:3000",
                                 "http://localhost:3001",
                                 "http://127.0.0.1:3000",
-                                "http://127.0.0.1:3001"));
+                                "http://127.0.0.1:3001");
+                configuration.setAllowedOrigins(allowedOrigins);
 
                 // 허용할 HTTP 메서드
                 configuration.setAllowedMethods(Arrays.asList("GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"));
