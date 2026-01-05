@@ -3,6 +3,7 @@ spring:
     name: api
   
   # PostgreSQL (Neon DB) 설정
+  # DATABASE_URL이 있으면 사용, 없으면 개별 변수로 조합
   datasource:
     url: ${DATABASE_URL:jdbc:postgresql://${DB_HOST:localhost}:${DB_PORT:5432}/${DB_NAME:neondb}?sslmode=require&channel_binding=require}
     username: ${DB_USER:neondb_owner}
@@ -29,11 +30,11 @@ spring:
   # Redis 설정 (Upstash 클라우드 Redis 사용, 환경 변수로 오버라이드 가능)
   data:
     redis:
-      host: ${SPRING_DATA_REDIS_HOST:localhost}
-      port: ${SPRING_DATA_REDIS_PORT:6379}
-      password: ${SPRING_DATA_REDIS_PASSWORD:}
+      host: ${UPSTASH_REDIS_HOST:${SPRING_DATA_REDIS_HOST:localhost}}
+      port: ${UPSTASH_REDIS_PORT:${SPRING_DATA_REDIS_PORT:6379}}
+      password: ${UPSTASH_REDIS_PASSWORD:${SPRING_DATA_REDIS_PASSWORD:}}
       ssl:
-        enabled: ${SPRING_DATA_REDIS_SSL_ENABLED:false}
+        enabled: ${UPSTASH_REDIS_SSL_ENABLED:${SPRING_DATA_REDIS_SSL_ENABLED:false}}
       timeout: 2000ms
       lettuce:
         pool:

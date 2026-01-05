@@ -27,7 +27,7 @@ public class NaverController {
     @Autowired
     private JwtTokenProvider jwtTokenProvider;
 
-    @Value("${naver.frontend-url:http://localhost:3001}")
+    @Value("${naver.frontend-url:http://localhost:3000}")
     private String frontendUrl;
 
     @Value("${cookie.secure:false}")

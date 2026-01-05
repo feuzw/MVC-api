@@ -12,13 +12,14 @@ import org.springframework.http.ResponseCookie;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
+import jakarta.annotation.PostConstruct;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.util.HashMap;
 import java.util.Map;
 
 @RestController
-@RequestMapping("/auth/google")
+@RequestMapping("/api/auth/google")
 public class GoogleController {
 
     @Autowired
@@ -27,8 +28,13 @@ public class GoogleController {
     @Autowired
     private JwtTokenProvider jwtTokenProvider;
 
-    @Value("${google.frontend-url:http://localhost:3001}")
+    @Value("${google.frontend-url:http://localhost:3000}")
     private String frontendUrl;
+    
+    @PostConstruct
+    public void init() {
+        System.out.println("[GoogleController] 프론트엔드 URL 초기화: " + frontendUrl);
+    }
 
     @Value("${cookie.secure:false}")
     private boolean cookieSecure;
@@ -144,7 +150,9 @@ public class GoogleController {
                     .build();
 
             // 프론트엔드 리다이렉트 URL 생성
+            System.out.println("[GoogleController] 현재 frontendUrl 값: " + frontendUrl);
             String redirectUrl = frontendUrl + "/auth/google/callback?provider=google";
+            System.out.println("[GoogleController] 생성된 redirectUrl: " + redirectUrl);
 
             System.out.println("========================================");
             System.out.println("[구글 로그인 성공]");

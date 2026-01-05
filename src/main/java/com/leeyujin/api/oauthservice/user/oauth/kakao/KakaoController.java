@@ -27,7 +27,7 @@ public class KakaoController {
         @Autowired
         private JwtTokenProvider jwtTokenProvider;
 
-        @Value("${kakao.frontend-url:http://localhost:3001}")
+        @Value("${kakao.frontend-url:http://localhost:3000}")
         private String frontendUrl;
 
         @Value("${cookie.secure:false}")

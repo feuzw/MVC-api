@@ -105,11 +105,16 @@ public class GoogleOAuthClient implements OAuthClient {
     @Override
     public String getAuthUrl() {
         try {
-            return authUrl +
+            System.out.println("[GoogleOAuthClient] 리다이렉트 URI: " + redirectUri);
+            String encodedRedirectUri = URLEncoder.encode(redirectUri, StandardCharsets.UTF_8);
+            System.out.println("[GoogleOAuthClient] 인코딩된 리다이렉트 URI: " + encodedRedirectUri);
+            String authUrlWithParams = authUrl +
                     "?client_id=" + URLEncoder.encode(clientId, StandardCharsets.UTF_8) +
-                    "&redirect_uri=" + URLEncoder.encode(redirectUri, StandardCharsets.UTF_8) +
+                    "&redirect_uri=" + encodedRedirectUri +
                     "&response_type=code" +
                     "&scope=openid email profile";
+            System.out.println("[GoogleOAuthClient] 생성된 인가 URL: " + authUrlWithParams);
+            return authUrlWithParams;
         } catch (Exception e) {
             throw new RuntimeException("인가 URL 생성 실패", e);
         }

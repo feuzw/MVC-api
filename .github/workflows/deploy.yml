@@ -11,6 +11,7 @@ on:
 
 env:
   SERVICE_NAME: api-service
+  DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
 
 jobs:
   build-and-deploy:
@@ -34,12 +35,17 @@ jobs:
 
       - name: Build Docker image
         run: |
-          docker build -t ${{ env.SERVICE_NAME }}:${{ github.sha }} .
-          docker tag ${{ env.SERVICE_NAME }}:${{ github.sha }} ${{ env.SERVICE_NAME }}:latest
+          docker build -t ${{ env.DOCKER_USERNAME }}/${{ env.SERVICE_NAME }}:${{ github.sha }} .
+          docker tag ${{ env.DOCKER_USERNAME }}/${{ env.SERVICE_NAME }}:${{ github.sha }} ${{ env.DOCKER_USERNAME }}/${{ env.SERVICE_NAME }}:latest
 
-      - name: Save Docker image
+      - name: Login to Docker Hub
         run: |
-          docker save ${{ env.SERVICE_NAME }}:latest | gzip > ${{ env.SERVICE_NAME }}.tar.gz
+          echo "${{ secrets.DOCKER_PASSWORD }}" | docker login -u "${{ secrets.DOCKER_USERNAME }}" --password-stdin
+
+      - name: Push Docker image to Docker Hub
+        run: |
+          docker push ${{ env.DOCKER_USERNAME }}/${{ env.SERVICE_NAME }}:${{ github.sha }}
+          docker push ${{ env.DOCKER_USERNAME }}/${{ env.SERVICE_NAME }}:latest
 
       - name: Deploy to EC2
         env:
@@ -47,6 +53,8 @@ jobs:
           EC2_USER: ${{ secrets.EC2_USER }}
           EC2_SSH_KEY: ${{ secrets.EC2_SSH_KEY }}
           EC2_DEPLOY_PATH: ${{ secrets.EC2_DEPLOY_PATH || '/home/ubuntu/deploy' }}
+          DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
+          DOCKER_PASSWORD: ${{ secrets.DOCKER_PASSWORD }}
         run: |
           # SSH 키 설정
           mkdir -p ~/.ssh
@@ -58,23 +66,27 @@ jobs:
           ssh -i ~/.ssh/deploy_key $EC2_USER@$EC2_HOST \
             "mkdir -p $EC2_DEPLOY_PATH/${{ env.SERVICE_NAME }}"
 
-          # Docker 이미지 전송
-          scp -i ~/.ssh/deploy_key ${{ env.SERVICE_NAME }}.tar.gz \
-            $EC2_USER@$EC2_HOST:$EC2_DEPLOY_PATH/${{ env.SERVICE_NAME }}/
-
-          # EC2에서 Docker 이미지 로드 및 컨테이너 재시작
-          ssh -i ~/.ssh/deploy_key $EC2_USER@$EC2_HOST << 'ENDSSH'
-            DEPLOY_PATH="${{ secrets.EC2_DEPLOY_PATH || '/home/ubuntu/deploy' }}"
+          # EC2에서 Docker Hub에서 이미지 pull 및 컨테이너 재시작
+          ssh -i ~/.ssh/deploy_key $EC2_USER@$EC2_HOST << ENDSSH
+            DEPLOY_PATH="$EC2_DEPLOY_PATH"
             SERVICE_NAME="${{ env.SERVICE_NAME }}"
+            DOCKER_USERNAME="$DOCKER_USERNAME"
+            DOCKER_PASSWORD="$DOCKER_PASSWORD"
             
-            cd $DEPLOY_PATH/$SERVICE_NAME
+            cd \$DEPLOY_PATH/\$SERVICE_NAME
+            
+            # Docker Hub 로그인
+            echo "\$DOCKER_PASSWORD" | docker login -u "\$DOCKER_USERNAME" --password-stdin
             
             # 기존 컨테이너 중지 및 제거
-            docker stop $SERVICE_NAME || true
-            docker rm $SERVICE_NAME || true
+            docker stop \$SERVICE_NAME || true
+            docker rm \$SERVICE_NAME || true
             
-            # 새 이미지 로드
-            docker load -i $SERVICE_NAME.tar.gz
+            # 기존 이미지 제거 (선택사항, 디스크 공간 확보)
+            docker rmi \$DOCKER_USERNAME/\$SERVICE_NAME:latest || true
+            
+            # Docker Hub에서 최신 이미지 pull
+            docker pull \$DOCKER_USERNAME/\$SERVICE_NAME:latest
             
             # .env 파일 확인
             if [ ! -f .env ]; then
@@ -86,27 +98,24 @@ jobs:
             
             # 컨테이너 실행
             docker run -d \
-              --name $SERVICE_NAME \
+              --name \$SERVICE_NAME \
               --restart unless-stopped \
               -p 8080:8080 \
-              $ENV_FILE_ARG \
-              $SERVICE_NAME:latest
+              \$ENV_FILE_ARG \
+              \$DOCKER_USERNAME/\$SERVICE_NAME:latest
             
             # 컨테이너 상태 확인
             echo "=== Container Status ==="
             sleep 5
-            docker ps -a | grep $SERVICE_NAME || echo "⚠️  Container not found"
+            docker ps -a | grep \$SERVICE_NAME || echo "⚠️  Container not found"
             echo ""
             
             echo "=== Container Logs (last 100 lines) ==="
-            docker logs $SERVICE_NAME --tail 100 2>&1 || echo "⚠️  Could not fetch logs"
+            docker logs \$SERVICE_NAME --tail 100 2>&1 || echo "⚠️  Could not fetch logs"
             echo ""
             
             echo "=== Network Check ==="
             netstat -tlnp | grep 8080 || ss -tlnp | grep 8080 || echo "⚠️  Port 8080 not listening"
-            
-            # 임시 파일 정리
-            rm -f $SERVICE_NAME.tar.gz
           ENDSSH
 
       - name: Health Check
