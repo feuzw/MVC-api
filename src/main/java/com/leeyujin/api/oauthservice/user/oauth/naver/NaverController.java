@@ -169,13 +169,13 @@ public class NaverController {
             Long userId = savedUser.getId();
 
             // Access Token 생성 (10분)
-            String accessToken = jwtTokenProvider.generateAccessToken(
+            String ourAccessToken = jwtTokenProvider.generateAccessToken(
                     userId,
                     "naver",
                     email != null ? email : "",
                     nickname);
             System.out.println("[성공] Access Token 생성 완료: "
-                    + accessToken.substring(0, Math.min(30, accessToken.length())) + "...");
+                    + ourAccessToken.substring(0, Math.min(30, ourAccessToken.length())) + "...");
 
             // Refresh Token 생성 (14일, 회전 가능)
             String ourRefreshToken = jwtTokenProvider.generateRefreshToken(userId);
@@ -201,7 +201,7 @@ public class NaverController {
 
             // 프론트엔드 리다이렉트 URL 생성 (Access Token을 쿼리 파라미터로 전달)
             String redirectUrl = frontendUrl + "/auth/naver/callback?access_token=" 
-                    + URLEncoder.encode(accessToken, StandardCharsets.UTF_8);
+                    + URLEncoder.encode(ourAccessToken, StandardCharsets.UTF_8);
 
             System.out.println("========================================");
             System.out.println("[네이버 로그인 성공]");
@@ -209,7 +209,7 @@ public class NaverController {
             System.out.println("  - 우리 User ID: " + userId);
             System.out.println("  - 닉네임: " + nickname);
             System.out.println("  - 이메일: " + (email != null ? email : "없음"));
-            System.out.println("  - Access Token: " + accessToken.substring(0, Math.min(30, accessToken.length())) + "...");
+            System.out.println("  - Access Token: " + ourAccessToken.substring(0, Math.min(30, ourAccessToken.length())) + "...");
             System.out.println("  - Refresh Token (jti): " + refreshTokenJti);
             System.out.println("  - 리다이렉트 URL: " + redirectUrl);
             System.out.println("  - 쿠키 설정: HttpOnly=true, Secure=" + cookieSecure + ", SameSite="

@@ -180,28 +180,28 @@ public class GoogleController {
             Long userId = savedUser.getId();
 
             // Access Token 생성 (10분)
-            String accessToken = jwtTokenProvider.generateAccessToken(
+            String ourAccessToken = jwtTokenProvider.generateAccessToken(
                     userId,
                     "google",
                     email != null ? email : "",
                     nickname);
             System.out.println("[성공] Access Token 생성 완료: "
-                    + accessToken.substring(0, Math.min(30, accessToken.length())) + "...");
+                    + ourAccessToken.substring(0, Math.min(30, ourAccessToken.length())) + "...");
 
             // Refresh Token 생성 (14일, 회전 가능)
-            String refreshToken = jwtTokenProvider.generateRefreshToken(userId);
-            String refreshTokenJti = jwtTokenProvider.getJtiFromToken(refreshToken);
+            String ourRefreshToken = jwtTokenProvider.generateRefreshToken(userId);
+            String refreshTokenJti = jwtTokenProvider.getJtiFromToken(ourRefreshToken);
             System.out.println("[성공] Refresh Token 생성 완료 (jti: " + refreshTokenJti + ")");
 
             // Refresh Token을 DB에 저장 (기존 OAuth refresh_token 대신 우리 토큰 저장)
-            savedUser.setRefreshToken(refreshToken);
+            savedUser.setRefreshToken(ourRefreshToken);
             savedUser.setRefreshTokenExpiresAt(LocalDateTime.now().plusDays(14));
             userRepository.save(savedUser);
             System.out.println("[Neon] 우리 서비스 Refresh Token 저장 완료");
 
             // 5. Refresh Token을 HttpOnly 쿠키로 설정
             System.out.println("[5단계] Refresh Token 쿠키 설정 중...");
-            ResponseCookie refreshCookie = ResponseCookie.from("refresh_token", refreshToken)
+            ResponseCookie refreshCookie = ResponseCookie.from("refresh_token", ourRefreshToken)
                     .httpOnly(true)
                     .secure(cookieSecure)
                     .sameSite(cookieSameSite)
@@ -213,7 +213,7 @@ public class GoogleController {
             // 프론트엔드 리다이렉트 URL 생성 (Access Token을 쿼리 파라미터로 전달)
             System.out.println("[GoogleController] 현재 frontendUrl 값: " + frontendUrl);
             String redirectUrl = frontendUrl + "/auth/google/callback?access_token="
-                    + URLEncoder.encode(accessToken, StandardCharsets.UTF_8);
+                    + URLEncoder.encode(ourAccessToken, StandardCharsets.UTF_8);
             System.out.println("[GoogleController] 생성된 redirectUrl: " + redirectUrl);
 
             System.out.println("========================================");
@@ -223,7 +223,7 @@ public class GoogleController {
             System.out.println("  - 닉네임: " + nickname);
             System.out.println("  - 이메일: " + (email != null ? email : "없음"));
             System.out.println(
-                    "  - Access Token: " + accessToken.substring(0, Math.min(30, accessToken.length())) + "...");
+                    "  - Access Token: " + ourAccessToken.substring(0, Math.min(30, ourAccessToken.length())) + "...");
             System.out.println("  - Refresh Token (jti): " + refreshTokenJti);
             System.out.println("  - 리다이렉트 URL: " + redirectUrl);
             System.out.println("  - 쿠키 설정: HttpOnly=true, Secure=" + cookieSecure + ", SameSite="
