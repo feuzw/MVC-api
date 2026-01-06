@@ -11,6 +11,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseCookie;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.stereotype.Component;
 
 import jakarta.annotation.PostConstruct;
 import java.net.URLEncoder;
@@ -19,15 +20,15 @@ import java.util.HashMap;
 import java.util.Map;
 
 /**
- * Google OAuth 컨트롤러
+ * Google OAuth 서비스 컴포넌트
  * 
  * GatewayController를 통해 /api/auth/google 경로로 요청이 라우팅됩니다.
- * 실제 OAuth 로직은 이 컨트롤러에서 처리합니다.
+ * 실제 OAuth 로직은 이 컴포넌트에서 처리합니다.
  * 
- * 주의: @RequestMapping을 제거하여 직접 HTTP 매핑을 하지 않고,
+ * 주의: @Component로 변경하여 직접 HTTP 매핑을 하지 않고,
  * GatewayController를 통해서만 접근 가능하도록 했습니다.
  */
-@RestController
+@Component
 public class GoogleController {
 
     @Autowired
@@ -52,7 +53,7 @@ public class GoogleController {
 
     /**
      * 구글 인가 코드로 로그인 처리 (콜백 엔드포인트)
-     * GET /api/auth/google/callback?code=xxxxx
+     * GatewayController를 통해 /api/auth/google/callback?code=xxxxx로 접근
      * 
      * 플로우:
      * 1. 구글에서 인가 코드(code) 수신
@@ -62,8 +63,7 @@ public class GoogleController {
      * 5. HttpOnly + Secure 쿠키로 JWT 설정
      * 6. 프론트엔드로 302 Redirect
      */
-    @GetMapping("/callback")
-    public ResponseEntity<Void> callback(@RequestParam String code) {
+    public ResponseEntity<Void> callback(String code) {
         System.out.println("========================================");
         System.out.println("[구글 로그인 시작] 인가 코드 수신: " + code);
         System.out.println("========================================");
@@ -200,9 +200,8 @@ public class GoogleController {
 
     /**
      * 구글 인가 URL 반환
-     * GET /api/auth/google/login
+     * GatewayController를 통해 /api/auth/google/login로 접근
      */
-    @GetMapping("/login")
     public ResponseEntity<Map<String, Object>> getAuthUrl() {
         System.out.println("[구글 인가 URL 요청]");
         try {
