@@ -1,1 +1,24 @@
+pluginManagement {
+    repositories {
+        gradlePluginPortal()
+        mavenCentral()
+        google()
+        maven {
+            url = uri("https://repo.maven.apache.org/maven2")
+        }
+    }
+}
+
+dependencyResolutionManagement {
+    repositoriesMode.set(RepositoriesMode.PREFER_SETTINGS)
+    repositories {
+        gradlePluginPortal()
+        mavenCentral()
+        google()
+        maven {
+            url = uri("https://repo.maven.apache.org/maven2")
+        }
+    }
+}
+
 rootProject.name = 'api'
