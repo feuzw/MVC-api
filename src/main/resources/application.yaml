@@ -81,6 +81,7 @@ naver:
 cookie:
   secure: ${COOKIE_SECURE:false}
   same-site: ${COOKIE_SAME_SITE:Lax}
+  domain: ${COOKIE_DOMAIN:.leeyujin.kr}
 
 # JWT 설정
 jwt:

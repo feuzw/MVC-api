@@ -11,6 +11,7 @@ import java.util.Base64;
 import java.util.Date;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.UUID;
 
 @Component
 public class JwtTokenProvider {
@@ -57,24 +58,63 @@ public class JwtTokenProvider {
         this.expiration = expiration;
     }
 
-    // JWT 토큰 생성
-    public String generateToken(Long userId, String provider, String email, String nickname) {
+    // Access Token 생성 (짧게, 10분)
+    public String generateAccessToken(Long userId, String provider, String email, String nickname) {
         Date now = new Date();
-        Date expiryDate = new Date(now.getTime() + expiration);
+        Date expiryDate = new Date(now.getTime() + 10 * 60 * 1000); // 10분
 
         Map<String, Object> claims = new HashMap<>();
         claims.put("userId", userId);
         claims.put("provider", provider);
         claims.put("email", email);
         claims.put("nickname", nickname);
+        claims.put("typ", "access");
 
         return Jwts.builder()
                 .claims(claims)
                 .subject(userId.toString())
                 .issuedAt(now)
                 .expiration(expiryDate)
-                .signWith(secretKey, Jwts.SIG.HS256) // HS256: 256비트(32바이트) 키 사용
+                .signWith(secretKey, Jwts.SIG.HS256)
                 .compact();
+    }
+
+    // Refresh Token 생성 (길게, 14일, jti 포함)
+    public String generateRefreshToken(Long userId) {
+        Date now = new Date();
+        Date expiryDate = new Date(now.getTime() + 14 * 24 * 60 * 60 * 1000L); // 14일
+        String jti = UUID.randomUUID().toString(); // 토큰 ID (회전용)
+
+        Map<String, Object> claims = new HashMap<>();
+        claims.put("userId", userId);
+        claims.put("typ", "refresh");
+        claims.put("jti", jti); // 토큰 회전을 위한 고유 ID
+
+        return Jwts.builder()
+                .claims(claims)
+                .subject(userId.toString())
+                .id(jti)
+                .issuedAt(now)
+                .expiration(expiryDate)
+                .signWith(secretKey, Jwts.SIG.HS256)
+                .compact();
+    }
+
+    // JWT 토큰에서 jti 추출 (Refresh Token 회전용)
+    public String getJtiFromToken(String token) {
+        Claims claims = parseToken(token);
+        return claims.getId();
+    }
+
+    // JWT 토큰 타입 확인
+    public String getTokenType(String token) {
+        Claims claims = parseToken(token);
+        return (String) claims.get("typ");
+    }
+
+    // 기존 메서드 유지 (하위 호환성)
+    public String generateToken(Long userId, String provider, String email, String nickname) {
+        return generateAccessToken(userId, provider, email, nickname);
     }
 
     // JWT 토큰에서 사용자 ID 추출

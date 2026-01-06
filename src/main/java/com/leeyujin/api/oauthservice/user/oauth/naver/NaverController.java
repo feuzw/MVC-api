@@ -50,6 +50,9 @@ public class NaverController {
     @Value("${cookie.same-site:Lax}")
     private String cookieSameSite;
 
+    @Value("${cookie.domain:.leeyujin.kr}")
+    private String cookieDomain;
+
     /**
      * 네이버 인가 코드로 로그인 처리 (콜백 엔드포인트)
      * GatewayController를 통해 /api/auth/naver/callback?code=xxxxx&state=xxxxx로 접근
@@ -137,7 +140,8 @@ public class NaverController {
                     "[파싱 완료] 네이버 ID: " + naverId + ", 닉네임: " + nickname + ", 이메일: "
                             + (email != null ? email : "없음"));
 
-            // 사용자 정보와 Refresh Token을 Neon(PostgreSQL) users 테이블에 저장
+            // 사용자 정보를 Neon(PostgreSQL) users 테이블에 저장
+            User savedUser;
             try {
                 // 기존 사용자 조회 또는 생성
                 User user = userRepository.findByProviderAndProviderId("naver", naverId)
@@ -152,72 +156,70 @@ public class NaverController {
                 user.setEmail(email);
                 user.setNickname(nickname);
                 
-                // Refresh Token 저장 (7일 후 만료)
-                if (refreshToken != null && !refreshToken.isEmpty()) {
-                    user.setRefreshToken(refreshToken);
-                    user.setRefreshTokenExpiresAt(LocalDateTime.now().plusDays(7));
-                    System.out.println("[Neon] Refresh Token 저장 완료 - User ID: " + naverId);
-                }
-                
-                userRepository.save(user);
+                savedUser = userRepository.save(user);
                 System.out.println("[Neon] 사용자 정보 저장 완료 - Provider: naver, Provider ID: " + naverId);
             } catch (Exception e) {
                 System.err.println("[Neon] 사용자 정보 저장 실패: " + e.getMessage());
                 e.printStackTrace();
+                throw e;
             }
 
-            // 4. JWT 토큰 생성 (네이버 ID를 Long으로 변환 시도, 실패 시 해시값 사용)
-            System.out.println("[4단계] JWT 토큰 생성 중...");
-            Long userId;
-            try {
-                userId = Long.parseLong(naverId);
-            } catch (NumberFormatException e) {
-                // 네이버 ID가 숫자가 아닌 경우 해시값 사용
-                userId = (long) naverId.hashCode();
-            }
+            // 4. 우리 서비스용 Access/Refresh 토큰 생성
+            System.out.println("[4단계] 우리 서비스용 토큰 생성 중...");
+            Long userId = savedUser.getId();
 
-            String jwtToken = jwtTokenProvider.generateToken(
+            // Access Token 생성 (10분)
+            String accessToken = jwtTokenProvider.generateAccessToken(
                     userId,
                     "naver",
                     email != null ? email : "",
                     nickname);
-            System.out.println("[성공] JWT 토큰 생성 완료: "
-                    + jwtToken.substring(0, Math.min(30, jwtToken.length())) + "...");
+            System.out.println("[성공] Access Token 생성 완료: "
+                    + accessToken.substring(0, Math.min(30, accessToken.length())) + "...");
 
-            // 5. HttpOnly + Secure 쿠키 생성
-            System.out.println("[5단계] 보안 쿠키 생성 중...");
+            // Refresh Token 생성 (14일, 회전 가능)
+            String ourRefreshToken = jwtTokenProvider.generateRefreshToken(userId);
+            String refreshTokenJti = jwtTokenProvider.getJtiFromToken(ourRefreshToken);
+            System.out.println("[성공] Refresh Token 생성 완료 (jti: " + refreshTokenJti + ")");
 
-            // 쿠키 설정: HttpOnly, Secure, SameSite
-            // HttpOnly: JavaScript 접근 불가 (XSS 공격 방지)
-            // Secure: HTTPS에서만 전송 (프로덕션: true, 개발: false)
-            // SameSite: CSRF 공격 방지 (Lax: 같은 사이트, None: 다른 도메인 허용)
-            ResponseCookie cookie = ResponseCookie.from("token", jwtToken)
+            // Refresh Token을 DB에 저장
+            savedUser.setRefreshToken(ourRefreshToken);
+            savedUser.setRefreshTokenExpiresAt(LocalDateTime.now().plusDays(14));
+            userRepository.save(savedUser);
+            System.out.println("[Neon] 우리 서비스 Refresh Token 저장 완료");
+
+            // 5. Refresh Token을 HttpOnly 쿠키로 설정
+            System.out.println("[5단계] Refresh Token 쿠키 설정 중...");
+            ResponseCookie refreshCookie = ResponseCookie.from("refresh_token", ourRefreshToken)
                     .httpOnly(true)
                     .secure(cookieSecure)
                     .sameSite(cookieSameSite)
-                    .path("/")
-                    .maxAge(86400) // 24시간 (초 단위)
+                    .domain(cookieDomain)
+                    .path("/api/auth/refresh")
+                    .maxAge(14 * 24 * 60 * 60) // 14일
                     .build();
 
-            // 프론트엔드 리다이렉트 URL 생성
-            String redirectUrl = frontendUrl + "/auth/naver/callback?provider=naver";
+            // 프론트엔드 리다이렉트 URL 생성 (Access Token을 쿼리 파라미터로 전달)
+            String redirectUrl = frontendUrl + "/auth/naver/callback?access_token=" 
+                    + URLEncoder.encode(accessToken, StandardCharsets.UTF_8);
 
             System.out.println("========================================");
             System.out.println("[네이버 로그인 성공]");
             System.out.println("  - 네이버 ID: " + naverId);
+            System.out.println("  - 우리 User ID: " + userId);
             System.out.println("  - 닉네임: " + nickname);
             System.out.println("  - 이메일: " + (email != null ? email : "없음"));
-            System.out.println("  - JWT 토큰: " + jwtToken.substring(0, Math.min(50, jwtToken.length()))
-                    + "...");
+            System.out.println("  - Access Token: " + accessToken.substring(0, Math.min(30, accessToken.length())) + "...");
+            System.out.println("  - Refresh Token (jti): " + refreshTokenJti);
             System.out.println("  - 리다이렉트 URL: " + redirectUrl);
             System.out.println("  - 쿠키 설정: HttpOnly=true, Secure=" + cookieSecure + ", SameSite="
-                    + cookieSameSite);
+                    + cookieSameSite + ", Domain=" + cookieDomain);
             System.out.println("========================================");
 
-            // 302 Redirect with HttpOnly Cookie
+            // 302 Redirect with Refresh Token Cookie
             return ResponseEntity.status(HttpStatus.FOUND)
                     .header(HttpHeaders.LOCATION, redirectUrl)
-                    .header(HttpHeaders.SET_COOKIE, cookie.toString())
+                    .header(HttpHeaders.SET_COOKIE, refreshCookie.toString())
                     .build();
 
         } catch (Exception e) {

@@ -56,6 +56,9 @@ public class GoogleController {
     @Value("${cookie.same-site:Lax}")
     private String cookieSameSite;
 
+    @Value("${cookie.domain:.leeyujin.kr}")
+    private String cookieDomain;
+
     /**
      * 구글 인가 코드로 로그인 처리 (콜백 엔드포인트)
      * GatewayController를 통해 /api/auth/google/callback?code=xxxxx로 접근
@@ -168,60 +171,69 @@ public class GoogleController {
                 e.printStackTrace();
             }
 
-            // 4. JWT 토큰 생성 (구글 ID를 Long으로 변환 시도, 실패 시 해시값 사용)
-            System.out.println("[4단계] JWT 토큰 생성 중...");
-            Long userId;
-            try {
-                userId = Long.parseLong(googleId);
-            } catch (NumberFormatException e) {
-                // 구글 ID가 숫자가 아닌 경우 해시값 사용
-                userId = (long) googleId.hashCode();
-            }
+            // 4. 우리 서비스용 Access/Refresh 토큰 생성
+            System.out.println("[4단계] 우리 서비스용 토큰 생성 중...");
 
-            String jwtToken = jwtTokenProvider.generateToken(
+            // User ID는 DB의 id 사용 (없으면 새로 생성된 것)
+            User savedUser = userRepository.findByProviderAndProviderId("google", googleId)
+                    .orElseThrow(() -> new RuntimeException("User not found after save"));
+            Long userId = savedUser.getId();
+
+            // Access Token 생성 (10분)
+            String accessToken = jwtTokenProvider.generateAccessToken(
                     userId,
                     "google",
                     email != null ? email : "",
                     nickname);
-            System.out.println("[성공] JWT 토큰 생성 완료: "
-                    + jwtToken.substring(0, Math.min(30, jwtToken.length())) + "...");
+            System.out.println("[성공] Access Token 생성 완료: "
+                    + accessToken.substring(0, Math.min(30, accessToken.length())) + "...");
 
-            // 5. HttpOnly + Secure 쿠키 생성
-            System.out.println("[5단계] 보안 쿠키 생성 중...");
+            // Refresh Token 생성 (14일, 회전 가능)
+            String refreshToken = jwtTokenProvider.generateRefreshToken(userId);
+            String refreshTokenJti = jwtTokenProvider.getJtiFromToken(refreshToken);
+            System.out.println("[성공] Refresh Token 생성 완료 (jti: " + refreshTokenJti + ")");
 
-            // 쿠키 설정: HttpOnly, Secure, SameSite
-            // HttpOnly: JavaScript 접근 불가 (XSS 공격 방지)
-            // Secure: HTTPS에서만 전송 (프로덕션: true, 개발: false)
-            // SameSite: CSRF 공격 방지 (Lax: 같은 사이트, None: 다른 도메인 허용)
-            ResponseCookie cookie = ResponseCookie.from("token", jwtToken)
+            // Refresh Token을 DB에 저장 (기존 OAuth refresh_token 대신 우리 토큰 저장)
+            savedUser.setRefreshToken(refreshToken);
+            savedUser.setRefreshTokenExpiresAt(LocalDateTime.now().plusDays(14));
+            userRepository.save(savedUser);
+            System.out.println("[Neon] 우리 서비스 Refresh Token 저장 완료");
+
+            // 5. Refresh Token을 HttpOnly 쿠키로 설정
+            System.out.println("[5단계] Refresh Token 쿠키 설정 중...");
+            ResponseCookie refreshCookie = ResponseCookie.from("refresh_token", refreshToken)
                     .httpOnly(true)
                     .secure(cookieSecure)
                     .sameSite(cookieSameSite)
-                    .path("/")
-                    .maxAge(86400) // 24시간 (초 단위)
+                    .domain(cookieDomain) // 서브도메인 공유
+                    .path("/api/auth/refresh") // refresh 엔드포인트로 제한
+                    .maxAge(14 * 24 * 60 * 60) // 14일 (초 단위)
                     .build();
 
-            // 프론트엔드 리다이렉트 URL 생성
+            // 프론트엔드 리다이렉트 URL 생성 (Access Token을 쿼리 파라미터로 전달)
             System.out.println("[GoogleController] 현재 frontendUrl 값: " + frontendUrl);
-            String redirectUrl = frontendUrl + "/auth/google/callback?provider=google";
+            String redirectUrl = frontendUrl + "/auth/google/callback?access_token="
+                    + URLEncoder.encode(accessToken, StandardCharsets.UTF_8);
             System.out.println("[GoogleController] 생성된 redirectUrl: " + redirectUrl);
 
             System.out.println("========================================");
             System.out.println("[구글 로그인 성공]");
             System.out.println("  - 구글 ID: " + googleId);
+            System.out.println("  - 우리 User ID: " + userId);
             System.out.println("  - 닉네임: " + nickname);
             System.out.println("  - 이메일: " + (email != null ? email : "없음"));
-            System.out.println("  - JWT 토큰: " + jwtToken.substring(0, Math.min(50, jwtToken.length()))
-                    + "...");
+            System.out.println(
+                    "  - Access Token: " + accessToken.substring(0, Math.min(30, accessToken.length())) + "...");
+            System.out.println("  - Refresh Token (jti): " + refreshTokenJti);
             System.out.println("  - 리다이렉트 URL: " + redirectUrl);
             System.out.println("  - 쿠키 설정: HttpOnly=true, Secure=" + cookieSecure + ", SameSite="
-                    + cookieSameSite);
+                    + cookieSameSite + ", Domain=" + cookieDomain);
             System.out.println("========================================");
 
-            // 302 Redirect with HttpOnly Cookie
+            // 302 Redirect with Refresh Token Cookie
             return ResponseEntity.status(HttpStatus.FOUND)
                     .header(HttpHeaders.LOCATION, redirectUrl)
-                    .header(HttpHeaders.SET_COOKIE, cookie.toString())
+                    .header(HttpHeaders.SET_COOKIE, refreshCookie.toString())
                     .build();
 
         } catch (Exception e) {
