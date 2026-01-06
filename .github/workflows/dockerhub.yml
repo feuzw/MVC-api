@@ -181,19 +181,54 @@ jobs:
       - name: Health Check
         env:
           EC2_HOST: ${{ secrets.EC2_HOST }}
+          EC2_USER: ${{ secrets.EC2_USER }}
+          EC2_SSH_KEY: ${{ secrets.EC2_SSH_KEY }}
         run: |
-          echo "Waiting for service to start..."
-          echo "Service will be available at: http://$EC2_HOST:8080/actuator/health"
+          # SSH 키 설정
+          mkdir -p ~/.ssh
+          echo "$EC2_SSH_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan -H $EC2_HOST >> ~/.ssh/known_hosts
           
-          MAX_RETRIES=9
+          echo "=== Health Check Configuration ==="
+          echo "EC2 Host: $EC2_HOST"
+          echo "Service: ${{ env.SERVICE_NAME }}"
+          echo ""
+          
+          # 초기 대기 시간 (애플리케이션 시작 시간 확보)
+          INITIAL_WAIT=30
+          echo "Initial wait: ${INITIAL_WAIT}s for application startup..."
+          sleep $INITIAL_WAIT
+          
+          # 컨테이너 상태 사전 확인
+          echo ""
+          echo "=== Pre-check: Container Status ==="
+          CONTAINER_STATUS=$(ssh -i ~/.ssh/deploy_key $EC2_USER@$EC2_HOST \
+            "docker inspect --format='{{.State.Status}}' ${{ env.SERVICE_NAME }} 2>/dev/null || echo 'not_found'")
+          echo "Container Status: $CONTAINER_STATUS"
+          
+          if [ "$CONTAINER_STATUS" != "running" ]; then
+            echo "⚠️  Container is not running. Status: $CONTAINER_STATUS"
+            echo "=== Container Logs ==="
+            ssh -i ~/.ssh/deploy_key $EC2_USER@$EC2_HOST \
+              "docker logs ${{ env.SERVICE_NAME }} --tail 100 2>&1" || echo "Could not fetch logs"
+            echo "❌ Health check failed: Container is not running"
+            exit 1
+          fi
+          
+          echo ""
+          echo "=== Starting Health Check ==="
+          MAX_RETRIES=15
           RETRY_INTERVAL=10
           
           for i in $(seq 1 $MAX_RETRIES); do
             echo ""
             echo "Health check attempt $i/$MAX_RETRIES..."
             
-            HTTP_CODE_ACTUATOR=$(curl -s -o /dev/null -w "%{http_code}" --max-time 5 http://$EC2_HOST:8080/actuator/health 2>&1 || echo "000")
-            HTTP_CODE_ROOT=$(curl -s -o /dev/null -w "%{http_code}" --max-time 5 http://$EC2_HOST:8080/health 2>&1 || echo "000")
+            HTTP_CODE_ACTUATOR=$(curl -s -o /dev/null -w "%{http_code}" --max-time 10 --connect-timeout 5 \
+              http://$EC2_HOST:8080/actuator/health 2>&1 || echo "000")
+            HTTP_CODE_ROOT=$(curl -s -o /dev/null -w "%{http_code}" --max-time 10 --connect-timeout 5 \
+              http://$EC2_HOST:8080/health 2>&1 || echo "000")
             
             if [ "$HTTP_CODE_ACTUATOR" = "200" ] || [ "$HTTP_CODE_ACTUATOR" = "204" ]; then
               echo "✅ Health check passed! (/actuator/health returned HTTP $HTTP_CODE_ACTUATOR)"
@@ -203,6 +238,21 @@ jobs:
               exit 0
             else
               echo "⏳ /actuator/health: HTTP $HTTP_CODE_ACTUATOR, /health: HTTP $HTTP_CODE_ROOT"
+              
+              # 중간에 컨테이너 상태 재확인 (3회마다)
+              if [ $((i % 3)) -eq 0 ]; then
+                echo "   Checking container status..."
+                CONTAINER_STATUS=$(ssh -i ~/.ssh/deploy_key $EC2_USER@$EC2_HOST \
+                  "docker inspect --format='{{.State.Status}}' ${{ env.SERVICE_NAME }} 2>/dev/null || echo 'not_found'")
+                echo "   Container Status: $CONTAINER_STATUS"
+                
+                if [ "$CONTAINER_STATUS" != "running" ]; then
+                  echo "   ⚠️  Container stopped! Fetching recent logs..."
+                  ssh -i ~/.ssh/deploy_key $EC2_USER@$EC2_HOST \
+                    "docker logs ${{ env.SERVICE_NAME }} --tail 50 2>&1" || echo "Could not fetch logs"
+                fi
+              fi
+              
               if [ $i -lt $MAX_RETRIES ]; then
                 echo "   Waiting ${RETRY_INTERVAL}s before next attempt..."
                 sleep $RETRY_INTERVAL
@@ -212,6 +262,20 @@ jobs:
           
           echo ""
           echo "❌ Health check failed after $MAX_RETRIES attempts"
-          echo "Check container logs: docker logs ${{ env.SERVICE_NAME }}"
+          echo ""
+          echo "=== Final Diagnostics ==="
+          ssh -i ~/.ssh/deploy_key $EC2_USER@$EC2_HOST << ENDSSH
+            echo "Container Status:"
+            docker ps -a | grep ${{ env.SERVICE_NAME }} || echo "Container not found"
+            echo ""
+            echo "Container Logs (last 100 lines):"
+            docker logs ${{ env.SERVICE_NAME }} --tail 100 2>&1 || echo "Could not fetch logs"
+            echo ""
+            echo "Port 8080 check:"
+            netstat -tuln | grep 8080 || echo "Port 8080 not listening"
+            echo ""
+            echo "Docker container inspect:"
+            docker inspect ${{ env.SERVICE_NAME }} 2>&1 | grep -A 10 "State" || echo "Could not inspect"
+          ENDSSH
           exit 1
 
