@@ -31,12 +31,7 @@ public class SecurityConfig {
                                 .authorizeHttpRequests(auth -> auth
                                                 .requestMatchers(
                                                                 "/",
-                                                                "/auth/google/**",
-                                                                "/auth/kakao/**",
-                                                                "/auth/naver/**",
-                                                                "/api/auth/google/**",
-                                                                "/api/auth/kakao/**",
-                                                                "/api/auth/naver/**",
+                                                                "/api/**", // 게이트웨이를 통한 모든 API 요청 허용
                                                                 "/health",
                                                                 "/actuator/**",
                                                                 "/api-docs/**",

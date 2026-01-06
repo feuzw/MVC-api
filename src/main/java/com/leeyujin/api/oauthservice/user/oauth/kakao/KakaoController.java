@@ -17,8 +17,16 @@ import java.nio.charset.StandardCharsets;
 import java.util.HashMap;
 import java.util.Map;
 
+/**
+ * Kakao OAuth 컨트롤러
+ * 
+ * GatewayController를 통해 /api/auth/kakao 경로로 요청이 라우팅됩니다.
+ * 실제 OAuth 로직은 이 컨트롤러에서 처리합니다.
+ * 
+ * 주의: @RequestMapping을 제거하여 직접 HTTP 매핑을 하지 않고,
+ * GatewayController를 통해서만 접근 가능하도록 했습니다.
+ */
 @RestController
-@RequestMapping("/auth/kakao")
 public class KakaoController {
 
         @Autowired
@@ -199,4 +207,3 @@ public class KakaoController {
         }
 
 }
-
