@@ -10,8 +10,8 @@ import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseCookie;
 import org.springframework.http.ResponseEntity;
-import org.springframework.web.bind.annotation.*;
 import org.springframework.stereotype.Component;
+import org.springframework.data.redis.core.RedisTemplate;
 
 import jakarta.annotation.PostConstruct;
 import java.net.URLEncoder;
@@ -36,6 +36,9 @@ public class GoogleController {
 
     @Autowired
     private JwtTokenProvider jwtTokenProvider;
+
+    @Autowired
+    private RedisTemplate<String, Object> redisTemplate;
 
     @Value("${google.frontend-url:http://localhost:3000}")
     private String frontendUrl;
@@ -133,6 +136,25 @@ public class GoogleController {
             System.out.println(
                     "[파싱 완료] 구글 ID: " + googleId + ", 닉네임: " + nickname + ", 이메일: "
                             + (email != null ? email : "없음"));
+
+            // 토큰을 Redis(Upstash)에 저장 (Upstash 콘솔에서 확인용)
+            try {
+                String accessTokenKey = "oauth:google:access_token:" + googleId;
+                String refreshTokenKey = "oauth:google:refresh_token:" + googleId;
+
+                // Access Token 저장 (15분 TTL)
+                redisTemplate.opsForValue().set(accessTokenKey, accessToken, java.time.Duration.ofMinutes(15));
+                System.out.println("[Redis] Access Token 저장 완료: " + accessTokenKey);
+
+                // Refresh Token 저장 (7일 TTL)
+                if (refreshToken != null && !refreshToken.isEmpty()) {
+                    redisTemplate.opsForValue().set(refreshTokenKey, refreshToken, java.time.Duration.ofDays(7));
+                    System.out.println("[Redis] Refresh Token 저장 완료: " + refreshTokenKey);
+                }
+            } catch (Exception e) {
+                System.err.println("[Redis] 토큰 저장 실패: " + e.getMessage());
+                e.printStackTrace();
+            }
 
             // 4. JWT 토큰 생성 (구글 ID를 Long으로 변환 시도, 실패 시 해시값 사용)
             System.out.println("[4단계] JWT 토큰 생성 중...");
