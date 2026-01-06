@@ -11,9 +11,11 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseCookie;
 import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Component;
-import org.springframework.data.redis.core.RedisTemplate;
+import com.leeyujin.api.entity.User;
+import com.leeyujin.api.repository.UserRepository;
 
 import java.net.URLEncoder;
+import java.time.LocalDateTime;
 import java.nio.charset.StandardCharsets;
 import java.util.HashMap;
 import java.util.Map;
@@ -37,7 +39,7 @@ public class KakaoController {
         private JwtTokenProvider jwtTokenProvider;
 
         @Autowired
-        private RedisTemplate<String, Object> redisTemplate;
+        private UserRepository userRepository;
 
         @Value("${kakao.frontend-url:http://localhost:3000}")
         private String frontendUrl;
@@ -133,25 +135,34 @@ public class KakaoController {
                                         "[파싱 완료] 카카오 ID: " + kakaoId + ", 닉네임: " + nickname + ", 이메일: "
                                                         + (email != null ? email : "없음"));
 
-                        // 토큰을 Redis(Upstash)에 저장 (Upstash 콘솔에서 확인용)
+                        // 사용자 정보와 Refresh Token을 Neon(PostgreSQL) users 테이블에 저장
                         try {
                                 String kakaoIdStr = String.valueOf(kakaoId);
-                                String accessTokenKey = "oauth:kakao:access_token:" + kakaoIdStr;
-                                String refreshTokenKey = "oauth:kakao:refresh_token:" + kakaoIdStr;
 
-                                // Access Token 저장 (15분 TTL)
-                                redisTemplate.opsForValue().set(accessTokenKey, accessToken,
-                                                java.time.Duration.ofMinutes(15));
-                                System.out.println("[Redis] Access Token 저장 완료: " + accessTokenKey);
+                                // 기존 사용자 조회 또는 생성
+                                User user = userRepository.findByProviderAndProviderId("kakao", kakaoIdStr)
+                                                .orElse(User.builder()
+                                                                .provider("kakao")
+                                                                .providerId(kakaoIdStr)
+                                                                .email(email)
+                                                                .nickname(nickname)
+                                                                .build());
 
-                                // Refresh Token 저장 (7일 TTL)
+                                // 사용자 정보 업데이트
+                                user.setEmail(email);
+                                user.setNickname(nickname);
+
+                                // Refresh Token 저장 (7일 후 만료)
                                 if (refreshToken != null && !refreshToken.isEmpty()) {
-                                        redisTemplate.opsForValue().set(refreshTokenKey, refreshToken,
-                                                        java.time.Duration.ofDays(7));
-                                        System.out.println("[Redis] Refresh Token 저장 완료: " + refreshTokenKey);
+                                        user.setRefreshToken(refreshToken);
+                                        user.setRefreshTokenExpiresAt(LocalDateTime.now().plusDays(7));
+                                        System.out.println("[Neon] Refresh Token 저장 완료 - User ID: " + kakaoIdStr);
                                 }
+
+                                userRepository.save(user);
+                                System.out.println("[Neon] 사용자 정보 저장 완료 - Provider: kakao, Provider ID: " + kakaoIdStr);
                         } catch (Exception e) {
-                                System.err.println("[Redis] 토큰 저장 실패: " + e.getMessage());
+                                System.err.println("[Neon] 사용자 정보 저장 실패: " + e.getMessage());
                                 e.printStackTrace();
                         }
 

@@ -18,7 +18,7 @@ spring:
   
   jpa:
     hibernate:
-      ddl-auto: ${JPA_DDL_AUTO:validate} # validate, update, create, create-drop
+      ddl-auto: update # ${JPA_DDL_AUTO:validate} # validate, update, create, create-drop
     show-sql: ${JPA_SHOW_SQL:false}
     properties:
       hibernate:
