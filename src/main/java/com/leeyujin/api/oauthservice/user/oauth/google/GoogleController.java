@@ -84,10 +84,20 @@ public class GoogleController {
             }
 
             String accessToken = tokenResponse.getAccessToken();
+            String refreshToken = tokenResponse.getRefreshToken();
+
             System.out.println(
                     "[성공] 액세스 토큰 발급 완료: "
                             + accessToken.substring(0, Math.min(20, accessToken.length()))
                             + "...");
+
+            // Refresh Token 로그 출력 (임시 디버깅용)
+            if (refreshToken != null && !refreshToken.isEmpty()) {
+                System.out.println("[성공] 리프레시 토큰 발급 완료: "
+                        + refreshToken.substring(0, Math.min(30, refreshToken.length())) + "...");
+            } else {
+                System.out.println("[⚠️ 경고] 리프레시 토큰이 발급되지 않았습니다. (인가 URL에 access_type=offline 필요)");
+            }
 
             // 2. 액세스 토큰으로 사용자 정보 요청
             System.out.println("[2단계] 액세스 토큰으로 사용자 정보 요청 중...");

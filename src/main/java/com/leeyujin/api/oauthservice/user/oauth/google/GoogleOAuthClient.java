@@ -112,7 +112,9 @@ public class GoogleOAuthClient implements OAuthClient {
                     "?client_id=" + URLEncoder.encode(clientId, StandardCharsets.UTF_8) +
                     "&redirect_uri=" + encodedRedirectUri +
                     "&response_type=code" +
-                    "&scope=openid email profile";
+                    "&scope=openid email profile" +
+                    "&access_type=offline" +  // refresh_token을 받기 위해 필요
+                    "&prompt=consent";       // 매번 refresh_token을 받기 위해 필요
             System.out.println("[GoogleOAuthClient] 생성된 인가 URL: " + authUrlWithParams);
             return authUrlWithParams;
         } catch (Exception e) {
