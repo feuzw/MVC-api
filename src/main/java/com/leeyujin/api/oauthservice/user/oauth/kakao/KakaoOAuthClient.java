@@ -99,10 +99,16 @@ public class KakaoOAuthClient implements OAuthClient {
     @Override
     public String getAuthUrl() {
         try {
-            return authUrl + "/oauth/authorize" +
+            System.out.println("[KakaoOAuthClient] 리다이렉트 URI: " + redirectUri);
+            String encodedRedirectUri = URLEncoder.encode(redirectUri, StandardCharsets.UTF_8);
+            System.out.println("[KakaoOAuthClient] 인코딩된 리다이렉트 URI: " + encodedRedirectUri);
+            String authUrlWithParams = authUrl + "/oauth/authorize" +
                     "?client_id=" + URLEncoder.encode(clientId, StandardCharsets.UTF_8) +
-                    "&redirect_uri=" + URLEncoder.encode(redirectUri, StandardCharsets.UTF_8) +
-                    "&response_type=code";
+                    "&redirect_uri=" + encodedRedirectUri +
+                    "&response_type=code" +
+                    "&scope=account_email profile_nickname"; // 카카오 이메일 및 닉네임 권한 요청
+            System.out.println("[KakaoOAuthClient] 생성된 인가 URL: " + authUrlWithParams);
+            return authUrlWithParams;
         } catch (Exception e) {
             throw new RuntimeException("인가 URL 생성 실패", e);
         }

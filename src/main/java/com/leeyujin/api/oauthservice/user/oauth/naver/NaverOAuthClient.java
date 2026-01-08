@@ -113,12 +113,17 @@ public class NaverOAuthClient implements OAuthClient {
     @Override
     public String getAuthUrl() {
         try {
+            System.out.println("[NaverOAuthClient] 리다이렉트 URI: " + redirectUri);
+            String encodedRedirectUri = URLEncoder.encode(redirectUri, StandardCharsets.UTF_8);
+            System.out.println("[NaverOAuthClient] 인코딩된 리다이렉트 URI: " + encodedRedirectUri);
             String state = UUID.randomUUID().toString();
-            return authUrl +
+            String authUrlWithParams = authUrl +
                     "?response_type=code" +
                     "&client_id=" + URLEncoder.encode(clientId, StandardCharsets.UTF_8) +
-                    "&redirect_uri=" + URLEncoder.encode(redirectUri, StandardCharsets.UTF_8) +
+                    "&redirect_uri=" + encodedRedirectUri +
                     "&state=" + state;
+            System.out.println("[NaverOAuthClient] 생성된 인가 URL (state: " + state + "): " + authUrlWithParams);
+            return authUrlWithParams;
         } catch (Exception e) {
             throw new RuntimeException("인가 URL 생성 실패", e);
         }

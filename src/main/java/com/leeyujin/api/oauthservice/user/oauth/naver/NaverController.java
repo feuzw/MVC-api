@@ -166,6 +166,11 @@ public class NaverController {
 
             // 4. 우리 서비스용 Access/Refresh 토큰 생성
             System.out.println("[4단계] 우리 서비스용 토큰 생성 중...");
+
+            // User ID는 DB의 id 사용 (없으면 새로 생성된 것)
+            // 저장 후 다시 조회하여 확실한 ID 확보
+            savedUser = userRepository.findByProviderAndProviderId("naver", naverId)
+                    .orElseThrow(() -> new RuntimeException("User not found after save"));
             Long userId = savedUser.getId();
 
             // Access Token 생성 (10분)
